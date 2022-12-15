@@ -1,8 +1,6 @@
 # Tests for the spread functions written in cpp (through Rcpp), in
 # spread_functions_**date**.cpp
 
-setwd("/home/ivan/Insync/Fire spread modelling/fire_spread")
-
 library(Rcpp)
 library(terra)
 library(tidyverse)
