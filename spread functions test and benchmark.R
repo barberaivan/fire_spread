@@ -1,5 +1,5 @@
 # Tests for the spread functions written in cpp (through Rcpp), in
-# spread_functions_**date**.cpp
+# spread_functions.cpp
 
 library(Rcpp)
 library(terra)
