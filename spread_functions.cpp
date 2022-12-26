@@ -39,12 +39,53 @@ using namespace Rcpp;
 
 // -----------------------------------------------------------------------
 
+double elevation_mean = 1163.3;
+double elevation_sd = 399.5;
+
+/*
+ 
+ // * I want to hard-code an IntegerMatrix here, moves, but I can't.
+ // * Improve this later.
+ // * It should be called "moves".
+ 
+// [The R code:]
+// define queen neighbours
+// moves <- matrix(c(-1,-1,-1,  0,0,  1,1,1,
+//                   -1, 0, 1, -1,1, -1,0,1),
+//                   nrow = 2, byrow = TRUE)
+
+// A few trials: 
+ 
+// Rcpp::IntegerMatrix moves_cpp(2, 8);
+// 
+// moves_cpp(0, _) = {-1,-1,-1,  0,0,  1,1,1}; 
+// moves_cpp(1, _) = {-1, 0, 1, -1,1, -1,0,1};
+
+
+int moves[2][8] = {
+  {-1,-1,-1,  0,0,  1,1,1},
+  {-1, 0, 1, -1,1, -1,0,1}
+};
+
+// [[Rcpp::export]]
+IntegerMatrix moves_cpp(2, 8);
+
+for(int j = 0; j < 8; j++) {
+  for(int i = 0; i < 2; i++) {
+    moves_cpp(i, j) = moves[i, j]
+  }
+}
+ 
+*/
+
+// -----------------------------------------------------------------------
+  
 //' @title cell_to_rowcol_cpp
 //' @description Translates cell id to row and column.
 //' @return IntegerMatrix(2, n_cells): matrix with row and column ids, with each
 //'   column corresponding to a cell.
 //' @param NumericVector cells: cell ids.
-//' @param NumericVector n_rowcol: number or row and columns of the landscape.
+//' @param NumericVector n_rowcol: number of row and columns of the landscape.
 
 // 1 start
 // [[Rcpp::export]]
@@ -243,12 +284,12 @@ IntegerMatrix adjacent_cpp0(IntegerVector cells, IntegerVector n_rowcol,
 // Adjacent function start 0, using the full binary vector <burning> instead
 // of burning_cells. It is used to avoid memory allocation problems.
 
+//' @title adjacent_cpp0_2
 //' @description Gets the cell id of the neighbours of focal (burning) cells. It
 //'   takes into account that neighbours can't fall outside the landscape.
 //' @return IntegerMatrix(number of focal cells, 9): focal cells in rows,
 //'   neighbours in columns. (8-pixels neighbourhood). The first column contains
 //'   the ids of the burning cells.
-//'
 //' @param IntegerVector burning: binary vector as long as the landscape with
 //'   1s in the cells that are currently burning.
 
@@ -327,7 +368,8 @@ IntegerMatrix adjacent_cpp0_2(IntegerVector burning, IntegerVector n_rowcol,
 //' @param NumericMatrix data_neighbours: environmental data from target
 //'   neighbours with a column by landscape layer.
 //' @param NumericVector coef: parameters in logistic regression to compute the
-//'   spread probability as a function of covariates.
+//'   spread probability as a function of covariates. It has one more elements
+//'   than the columns of data_ because it includes the intercept.
 //' @param IntegerVector positions: relative position of each neighbour in
 //'   relation to the burning cell. The eight neighbours are labelled from 0 to
 //'   7 beggining from the upper-left one (by row):
@@ -350,14 +392,35 @@ IntegerMatrix adjacent_cpp0_2(IntegerVector burning, IntegerVector n_rowcol,
 //'   vector is always the same, unless the neighborhood is changed.
 //' @param double upper_limit: upper limit for spread probability (setting to
 //'   1 makes absurdly large fires).
+   
+//' The layers in data_ are:
+//'   subalpine forest, {0, 1} (shrubland goes in the intercept)
+//'   wet forest,       {0, 1}
+//'   dry forest,       {0, 1}
+//'   fwi,              (-Inf, +Inf) (standardized anomaly at pixel level)
+//'   aspect            [-1, 1] # Northwestyness
+//'   wind direction    [-1, 1] (windward vs leeward)
+//'   elevation,        (standardized in the code)
+
+//' The coefficients vector has a parameter by layer plus an intercept and the
+//' slope effect:
+//'   [Intercept] shrubland
+//'   subalpine forest,
+//'   wet forest,
+//'   dry forest,
+//'   fwi,
+//'   aspect,
+//'   wind,
+//'   elevation,  (note slope comes after elevation)
+//'   [slope],    (downhill or uphill, (-1, 1): 0 = flat, 1 = above, -1 = below)
 
 /*
  * Originally this functions modified the neighbours' data matrix, in the wind
  * and elevation columns, to compute angles or whatever was needed. That was
  * a bit problematic because then, in R the matrix remained modified, and
  * consecutive runs of the function were not the same.
- * This was resolved by creating new objects slope_term and wind_term, which
- * are added to the linear predictor after the loop adds the other terms.
+ * This was resolved by creating new objects elev_term, slope_term and wind_term, 
+ * which are added to the linear predictor after the loop adds the other terms.
  * This is why the wind and elevation columns in the data must be the last ones.
  */
 
@@ -378,31 +441,33 @@ IntegerVector spread_around_cpp(NumericVector data_burning,
   // Loop over neighbours: compute p and sample fire spread.
   for(int i = 0; i < data_neighbours.nrow(); i++) {
 
-    // recompute wind and elevation columns (will be wind and slope effects)
+    // compute elevation, slope and wind effects
 
     // slope (from elevation)
     double slope_term = sin(atan(
       (data_neighbours(i, elev_column) - data_burning(elev_column)) /
-        distances(positions(i))
+      distances(positions(i))
     ));
-
-    //Rcout << data_neighbours(i, elev_column) << "\n";
 
     // wind term
     double wind_term = cos(angles(positions(i)) - data_burning(wind_column));
-
+    
+    // elevation term (standardize predictor)
+    double elev_term = (data_neighbours(i, elev_column) - elevation_mean) / elevation_sd;
+    
     // compute probability
     double linpred = coef(0); // linear predictor, initialize as intercept.
     // (the design matrix lacks the intercept column.)
-    // All the effects besides wind and slope:
+    // All the effects besides elevation, slope and slope:
     for(int k = 0; k < (data_neighbours.ncol() - 2); k++) {
       linpred += coef(k+1) * data_neighbours(i, k);
     }
     // (coef is lagged ahead wrt the data_neighbours because it has the intercept,
     // which is not present in the data.)
-    // Add wind and slope terms
-    linpred += slope_term * coef[elev_column + 1] +
-      wind_term * coef[wind_column + 1];
+    // Add elevation, slope and wind effects
+    linpred += wind_term * coef[wind_column + 1] +  
+               elev_term * coef[elev_column + 1] + 
+               slope_term * coef[elev_column + 2]; // slope coef is after the elevation one
 
     double prob = upper_limit / (1 + exp(-linpred));
 
@@ -439,38 +504,40 @@ NumericVector spread_around_prob_cpp(NumericVector data_burning,
   // Loop over neighbours: compute p and sample fire spread.
   for(int i = 0; i < data_neighbours.nrow(); i++) {
 
-    // recompute wind and elevation columns (will be wind and slope effects)
-
+    // compute elevation, slope and wind effects
+    
     // slope (from elevation)
     double slope_term = sin(atan(
       (data_neighbours(i, elev_column) - data_burning(elev_column)) /
         distances(positions(i))
     ));
-
+    
     // wind term
     double wind_term = cos(angles(positions(i)) - data_burning(wind_column));
-
+    
+    // elevation term (standardize predictor)
+    double elev_term = (data_neighbours(i, elev_column) - elevation_mean) / elevation_sd;
+    
     // compute probability
     double linpred = coef(0); // linear predictor, initialize as intercept.
     // (the design matrix lacks the intercept column.)
-    // All the effects besides wind and slope:
+    // All the effects besides elevation, slope and slope:
     for(int k = 0; k < (data_neighbours.ncol() - 2); k++) {
       linpred += coef(k+1) * data_neighbours(i, k);
     }
     // (coef is lagged ahead wrt the data_neighbours because it has the intercept,
     // which is not present in the data.)
-    // Add wind and slope terms
-    linpred += slope_term * coef[elev_column + 1] +
-      wind_term * coef[wind_column + 1];
+    // Add elevation, slope and wind effects
+    linpred += wind_term * coef[wind_column + 1] +   
+               elev_term * coef[elev_column + 1] +
+               slope_term * coef[elev_column + 2]; // slope coef is after the elevation one
+               
 
     prob(i) = upper_limit / (1 + exp(-linpred));
   }
 
   return prob; // Used to check whether it matches the R function
 }
-
-
-
 
 
 
@@ -489,6 +556,7 @@ NumericVector spread_around_prob_cpp(NumericVector data_burning,
 //'   3 = not burnable.
 
 //' @param NumericMatrix landscape: environmental data from the whole landscape.
+//'   See description in spread_around.
 //' @param IntegerVector ignition_cell: id for the cell(s) where the fire begun.
 //' @param IntegerVector burnable: vector indicating if each pixel is burnable (1)
 //'   or not (0).

@@ -1,202 +1,47 @@
-# Tests for the spread functions written in cpp (through Rcpp), in
-# spread_functions.cpp
+# Tests for the spread functions, written in both cpp and R
 
 library(Rcpp)
 library(terra)
 library(tidyverse)
 library(microbenchmark)
 
+# load cpp and R functions:
 sourceCpp("spread_functions.cpp")
-
-# Create data -------------------------------------------------------------
-
-# model coefficients (includes intercept)
-coefs <- c(0.5, -1.5, 0.5, 0.5, 0.5, 0.5, 0.5)
-names(coefs) <- c("Intercept", "veg", "aspect", "pp", "temp", "elev", "wind")
-### IMPORTANT  ---> wind and elevation columns must be the last.
-
-elev_column <- which(names(coefs) == "elev") - 1
-wind_column <- which(names(coefs) == "wind") - 1 # -1 because the design matrix will have no intercept
-
-# test wind effect
-# coefs <- c(0.5, 0, 0, 0, 3, 0, 0)
-# test slope effect
-# coefs <- c(0.5, 0, 10, 0, 0, 0, 0)
-
-# predictors raster
-
-size <- 1200
-
-n_rows <- size
-n_cols <- size
-
-r_veg <- rast(ncol = n_cols, nrow = n_rows,
-              xmin = -1000, xmax = 1000, ymin = -1000, ymax = 1000)
-r_elev <- r_veg
-r_aspect <- r_veg
-r_wind <- r_veg
-r_pp <- r_veg
-r_temp <- r_veg
-
-values(r_veg) <- rbinom(ncell(r_veg), prob = 0.5, size = 1)
-# # to test elevation:
-# elevs <- matrix(NA, nrow(r_veg), ncol(r_veg))
-# elevs[1, ] <- 2000
-# for(i in 2:nrow(elevs)) elevs[i, ] <- elevs[i-1, ] - 2000 / nrow(r_veg)
-# as.numeric(t(elevs))#
-values(r_elev) <- rnorm(ncell(r_veg), 1000, 100) %>% abs
-values(r_aspect) <- cos(runif(ncell(r_veg), 0, 2 * pi) - 315 * pi / 180)
-values(r_wind) <- runif(ncell(r_veg), 0, 2 * pi)
-values(r_pp) <- runif(ncell(r_veg), 0, 1)
-values(r_temp) <- runif(ncell(r_veg), 0, 1)
-
-r_predictors <- c(r_veg, r_aspect, r_pp, r_temp, r_elev, r_wind)
-names(r_predictors) <- names(coefs)[-1]
-
-# values(r_predictors)[10, ]
-
-# vector of distances and angles between a cell and its neighbours
-# (used to compute slope and wind effects)
-
-distances <- rep(res(r_predictors)[1], 8) # sides
-distances[c(1, 3, 6, 8)] <- res(r_predictors)[1] * sqrt(2)
-
-angles_matrix <- matrix(
-  c(315, 0, 45,
-    270, NA, 90,
-    225, 180, 135),
-  3, 3, byrow = TRUE) * pi / 180
-angles <- as.numeric(angles_matrix %>% t) %>% na.omit # in radians
-
-# turn predictors into matrix
-predmat <- values(r_predictors)
-head(predmat)
-
-# create fire raster
-burn <- r_veg
-# fill raster
-# 0: unburned
-# 1: burning
-# 2: burned
-# 3: not flammable
-values(burn) <- 0 #rpois(ncell(burn), lambda = 1)
-
-# ignition point:
-#ig_location <- sample(1:ncell(burn), size = 1, replace = FALSE) #floor(ncell(burn) / 2 - 2) # cell number
-ig_location <- cellFromRowCol(burn, nrow(burn) / 2, ncol(burn) / 2)
-# set as burning
-values(burn)[ig_location:(ig_location+5)] <- 1
-# plot(r_predictors)
-
-# initialize burning_cells cell id
-burning_cells <- which(values(burn) == 1) # cell number id
-
-
-# Adjacency-related functions ---------------------------------------------
-
-# define queen neighbours
-moves <- matrix(c(-1,-1,-1,  0,0,  1,1,1,
-                  -1, 0, 1, -1,1, -1,0,1),
-                nrow = 2, byrow = TRUE)
-# in the eight-neighbour setting (1 step queen moves), to arrive at neighbours
-# we can make eight moves of rows and columns. moves indicates the row movements
-# (moves[1, ]) and the column movements (moves[2, ]) to get each neighbour.
-# neighbours are ordered row-wise:
-# (1, 2, 3,
-#  4, NA, 5,
-#  6, 7, 8)
-
-# row-col-cell functions
-
-# functions to translate cell id to row-col (analogue of terra::rowColFromCell)
-# Warning: there are no range restrictions, so use carefully.
-
-cell_to_rowcol <- function(cell, n_rowcol) {
-  # n_rowcol[1] = rows; n_rowcol[2] = cols.
-  row_position <- ceiling(cell / n_rowcol[2])
-  col_position <- n_rowcol[2] - (row_position * n_rowcol[2] - cell)
-  return(rbind(row_position, col_position))
-}
-
-# rowcol has to be a matrix (rowcol[1, ] = rows, rowcol[2, ] = columns)
-rowcol_to_cell <- function(rowcol, n_rowcol) {
-  return((rowcol[1, ] - 1) * n_rowcol[2] + rowcol[2, ])
-}
-
-# Adjacent  ----------------------------------------------------------------
-
-adjacent_r <- function(cells, n_rowcol) {
-
-  # (data to test)
-  # cells = rep(burning_cells, 3)
-  # cells = burning_cells
-  # n_rowcol = rc
-
-  # get row and col from cell id
-  row_col <- cell_to_rowcol(cells, n_rowcol)
-
-  # neighbours row_col
-  neigh_rc <- array(NA, dim = c(2, 8, length(cells)))
-  for(i in 1:length(cells)) {
-    neigh_rc[, , i] <- row_col[, i] + moves # neighbours row-column pairs
-  }
-
-  # Get position of values out of range
-  valid_id <- matrix(0, length(cells), 8)
-  for(c in 1:length(cells)) {
-    for(i in 1:8) {
-      if(neigh_rc[1, i, c] > 0 & neigh_rc[1, i, c] <= n_rowcol[1] &
-         neigh_rc[2, i, c] > 0 & neigh_rc[2, i, c] <= n_rowcol[2]) {
-        valid_id[c, i] <- 1
-      }
-    }
-  }
-
-  # get cell id
-  neigh_cell <- matrix(NA, length(cells), 8)
-  for(c in 1:length(cells)) {
-    for(i in 1:8) {
-      if(valid_id[c, i] == 1) {
-        tmp <- matrix(neigh_rc[, i, c], 2, 1)
-        neigh_cell[c, i] <- rowcol_to_cell(tmp, n_rowcol)
-      } else {
-        neigh_cell[c, i] <- NA
-      }
-    }
-  }
-
-  return(neigh_cell)
-}
+source("spread_functions.R")
 
 
 # Test adjacency related functions ----------------------------------------
 
-# sourceCpp("Spread function/spread_functions_2022-11-29.cpp")
+# compare the functions written in R by me, the ones from terra and the cpp ones
+# written with 0 and 1 indexing.
 
-rowcol <- c(5, 6)
+# data for testing
+rowcol <- c(5, 6) # number of rows and columns of the landscape
 rtest <- rast(ncol = rowcol[2], nrow = rowcol[1],
               xmin = -1000, xmax = 1000,
               ymin = -1000, ymax = 1000)
 
-
 # cell to rowcol
 
-matrix(1:prod(rowcol), byrow = TRUE, ncol = rowcol[2])
-matrix(1:prod(rowcol), byrow = TRUE, ncol = rowcol[2]) - 1
+# check visually whether results make sense or not, running the following lines 
+# a few times
+
+# start
+print("--------------------------------------------------------------------")
+matrix(1:prod(rowcol), byrow = TRUE, ncol = rowcol[2]) # matrix with cell ids
+matrix(1:prod(rowcol), byrow = TRUE, ncol = rowcol[2]) - 1 # with 0-indexing
 
 cell <- sample(1:prod(rowcol), size = 1)
 print(paste("cell: ", cell))
 
-cell_to_rowcol(cell, rowcol)
-cell_to_rowcol_cpp(cell, rowcol)
-terra::rowColFromCell(rtest, cell) %>% t
-cell_to_rowcol_cpp0(cell - 1, rowcol)
+cell_to_rowcol(cell, rowcol)                 # R
+cell_to_rowcol_cpp(cell, rowcol)             # cpp
+terra::rowColFromCell(rtest, cell) %>% t     # terra
+cell_to_rowcol_cpp0(cell - 1, rowcol)        # cpp 0-indexing
+# end
+
 
 # rowcol to cell
-
-rowcol <- c(5, 6)
-rast <- rast()
-
 
 print("--------------------------------------------------------------------")
 matrix(1:prod(rowcol), byrow = TRUE, ncol = rowcol[2])
@@ -206,16 +51,19 @@ row_col_id <- matrix(
   c(sample(1:rowcol[1], size = 1),
     sample(1:rowcol[2], size = 1)),
   ncol = 1
-  )
+)
 print(paste("row:", row_col_id[1,], ", col:", row_col_id[2,]))
 
 rowcol_to_cell(row_col_id, rowcol)
 rowcol_to_cell_cpp(row_col_id, rowcol)
-terra::cellFromRowCol(rtest, row_col_id[1], row_col_id[2]) # terra
+terra::cellFromRowCol(rtest, row_col_id[1], row_col_id[2]) 
 rowcol_to_cell_cpp0(row_col_id - 1, rowcol)
+
+
 
 # adjacent
 
+print("--------------------------------------------------------------------")
 cell <- sample(1:prod(rowcol), size = 1)
 print(paste("cell: ", cell))
 
@@ -228,248 +76,332 @@ terra::adjacent(rtest, cell, directions = "queen")
 adjacent_cpp0(cell - 1, rowcol, moves)
 
 
-# Spread around function test -----------------------------------------------
+
+# spread_around test ------------------------------------------------------
 
 
-spread_around_r <- function(data_burning,
-                            data_neighbours,
-                            coef = coefs,
-                            positions = 1:8,
-                            distances = distances,
-                            angles = angles,
-                            upper_limit = 1) {
+# create data for testing
+# model coefficients (includes intercept)
+coefs <- c(0.5, 
+           -1.5, -1.3, -0.5, 
+           1, 1, 1, 1, 1)
+names(coefs) <- c("intercept", 
+                  "subalpine", "wet", "dry",
+                  "fwi", 
+                  "aspect", 
+                  "wind", 
+                  "elev",
+                  "slope")
+### IMPORTANT  ---> wind and elevation parameters must be the last ones.
 
-  # recompute wind and elev columns (will be slope and wind effects)
-  data_neighbours[, "elev"] <- sin(atan((data_neighbours[, "elev"] - data_burning[1, "elev"]) / distances[positions]))
-  # CAREFUL: data_burning was a df, so we need to select its unic
-  # and first row: [1, "elev"]
+elev_column <- which(names(coefs) == "elev") - 1
+wind_column <- which(names(coefs) == "wind") - 1 # -1 because the design matrix will have no intercept
 
-  data_neighbours[, "wind"] <- cos(angles[positions] - data_burning[1, "wind"])
-  # the same here, watch the [1, "wind"]
+# landscape raster
+size <- 30
+n_rows <- size
+n_cols <- size
 
-  # careful with upper limit
-  probs <- plogis(coefs[1] + as.matrix(data_neighbours) %*% coefs[2:length(coefs)]) * upper_limit
-  probs <- as.numeric(probs)
-
-  # set.seed(seed)
-  burn <- rbinom(length(probs), size = 1, prob = probs)
-
-  # return both the probability and the burn to check with the cpp function
-  result <- cbind(probs, burn)
-  colnames(result) <- c("probs", "burn")
-  # return(burn)
-  return(result)
-}
-
-# Test (use burn raster, created above)
-
-# get cell id from neighbours
-rc = c(nrow(burn), ncol(burn))
-burning_cell <- sample(1:prod(rc), size = 1)
-
-neighbours_matrix <- adjacent_r(cells = burning_cell, n_rowcol = rc)
-notna_neighs <- which(!is.na(neighbours_matrix[1, ]))
-
-neighbours_matrix <- neighbours_matrix[1, notna_neighs, drop = F]
-posits <- (1:8)[notna_neighs]
-
-db <- r_predictors[burning_cell] # data burning
-dn <- r_predictors[neighbours_matrix[1, ]] # data neighbours
-
-# For cpp we have to provide arguments in its simplest form, so turn
-# neighbours data into matrix:
-m <- matrix(NA, nrow = nrow(dn), ncol = ncol(dn))
-for(i in 1:ncol(m)) m[, i] <- dn[, i] %>% as.numeric
-# simulate a few burns
-m
-# sourceCpp("Spread function/spread_functions_2022-11-29.cpp")
-
-spread_around_prob_cpp(data_burning = as.numeric(db),
-                  data_neighbours = m,
-                  coef = unname(coefs),
-                  positions = posits - 1, # position of valid neighbours
-                  wind_column = wind_column - 1,
-                  elev_column = elev_column - 1,
-                  distances = distances,
-                  angles = as.numeric(angles), # in radians
-                  upper_limit = 1)
-m
-# la función de cpp modifica la matrix de data_neighbours, entonces cuando
-# la vuelvo a invocar usa otros datos y da cualquiera.
-# arreglar eso (duplicar no funcionó)
-
-spread_around_r(data_burning = db,
-                data_neighbours = dn, # with column names!
-                coef = unname(coefs),
-                positions = posits, # position of valid neighbours
-                distances = distances,
-                angles = as.numeric(angles), # in radians
-                upper_limit = 1)[, "probs"]
-# probabilities are OK
-
-# test stochastic simulation
-seed <- round(runif(1, 1, 1e6))
-print(paste("seed = ", seed))
-
-set.seed(seed)
-sim_r <- replicate(10,
-spread_around_r(data_burning = db,
-                data_neighbours = dn, # with column names!
-                coef = unname(coefs),
-                positions = posits, # position of valid neighbours
-                distances = distances,
-                angles = as.numeric(angles), # in radians
-                upper_limit = 1)[, "burn"]
+landscape <- rast(
+  ncol = n_cols, nrow = n_rows, 
+  nlyrs = length(coefs) - 2, # intercept and slope absent
+  xmin = -1000, xmax = 1000, ymin = -1000, ymax = 1000,
+  names = names(coefs)[-c(1, length(coefs))]
 )
 
-set.seed(seed)
-sim_cpp <- replicate(10,
-spread_around_cpp(data_burning = as.numeric(db),
-                  data_neighbours = m,
-                  coef = unname(coefs),
-                  positions = posits - 1, # position of valid neighbours
-                  wind_column = wind_column - 1,
-                  elev_column = elev_column - 1,
-                  distances = distances,
-                  angles = as.numeric(angles), # in radians
-                  upper_limit = 1)
+# fill vegetation
+veg_vals <-  rmultinom(ncell(landscape), size = 1, prob = rep(0.25, 4))[1:3, ] %>% t
+values(landscape)[, 1:3] <- veg_vals
+landscape$fwi <- rnorm(ncell(landscape))            # fwi anomalies
+landscape$aspect <- cos(runif(ncell(landscape), 0, 2 * pi) - 315 * pi / 180)  # northwestyness
+landscape$wind <- runif(ncell(landscape), 0, 2 * pi)    # wind direction in radians
+landscape$elev <- runif(ncell(landscape), 0, 2200)  # m above sea level
+
+# vector of distances and angles between a cell and its neighbours
+# (used to compute slope and wind effects)
+distances <- rep(res(landscape)[1], 8) # sides
+distances[c(1, 3, 6, 8)] <- res(landscape)[1] * sqrt(2)
+
+angles_matrix <- matrix(
+  c(315, 0, 45,
+    270, NA, 90,
+    225, 180, 135),
+  3, 3, byrow = TRUE) * pi / 180
+angles <- as.numeric(angles_matrix %>% t) %>% na.omit # in radians
+
+# turn landscape into matrix
+predmat <- values(landscape)
+
+
+# TEST probability output
+
+# start
+burning_cell <- sample(1:ncell(landscape), size = 1)
+neighs_raw <- adjacent(landscape, 1, "queen") %>% as.numeric
+not_na <- !is.na(neighs_raw)
+pos <- (1:8)[not_na]
+neighs_id <- neighs_raw[not_na]
+
+s <- round(runif(1, 0, 10000)) # get seed
+
+set.seed(s) # set seed to compare the random simulation for burning
+spread_result_r <- spread_around_r(
+  data_burning = predmat[burning_cell, , drop = F], # USE DROP!!
+  data_neighbours = predmat[neighs_id, , drop = F],
+  coef = coefs, 
+  positions = pos,
+  distances = distances,
+  angles = angles,
+  upper_limit = 1
 )
 
-all.equal(sim_r, sim_cpp)
-# perfect.
+set.seed(s)
+spread_result_cpp_burn <- spread_around_cpp(
+  data_burning = predmat[burning_cell, , drop = F], # USE DROP!!
+  data_neighbours = predmat[neighs_id, , drop = F],
+  coef = coefs, 
+  positions = pos - 1, # -1 for 0-indexing
+  distances = distances,
+  angles = angles,
+  upper_limit = 1,
+  wind_column = which(names(landscape) == "wind") - 1,
+  elev_column = which(names(landscape) == "elev") - 1  # -1 for 0-indexing
+)
+
+spread_result_cpp_prob <- spread_around_prob_cpp(
+  data_burning = predmat[burning_cell, , drop = F], # USE DROP!!
+  data_neighbours = predmat[neighs_id, , drop = F],
+  coef = coefs, 
+  positions = pos - 1, # -1 for 0-indexing
+  distances = distances,
+  angles = angles,
+  upper_limit = 1,
+  wind_column = which(names(landscape) == "wind") - 1,
+  elev_column = which(names(landscape) == "elev") - 1  # -1 for 0-indexing
+)
+
+# compare
+all.equal(spread_result_r[, "probs"], spread_result_cpp_prob)
+all.equal(spread_result_r[, "burn"], spread_result_cpp_burn)
+# end
 
 
-# simulate_fire function test -----------------------------------------------
 
-# create fire raster
-r <- r_veg
-# fill raster
-# 0: unburned
-# 1: burning
-# 2: burned
-# 3: not flammable
-values(r) <- 0 #rpois(ncell(r), lambda = 1)
+# simulate_fire tests -----------------------------------------------------
 
-# ignition point:
-#ig_location <- sample(1:ncell(r), size = 1, replace = FALSE) #floor(ncell(r) / 2 - 2) # cell number
-ig_location <- cellFromRowCol(r, nrow(r) / 2, ncol(r) / 2)
-# set as burning
-values(r)[ig_location] <- 1
-# plot(r_predictors)
 
-# burned vector:
-burned <- numeric(nrow(predmat))
-rc <- c(nrow(r), ncol(r))
+# create data for testing
+# model coefficients (includes intercept)
+coefs <- c(0.5, 
+           -1.5, -1.3, -0.5, 
+           1, 1, 1, 1, 1)
+names(coefs) <- c("intercept", 
+                  "subalpine", "wet", "dry",
+                  "fwi", 
+                  "aspect", 
+                  "wind", 
+                  "elev",
+                  "slope")
+### IMPORTANT  ---> wind and elevation parameters must be the last ones.
 
-# function to spread
+elev_column <- which(names(coefs) == "elev") - 1
+wind_column <- which(names(coefs) == "wind") - 1 # -1 because the design matrix will have no intercept
 
-simulate_fire_r <- function(landscape = r_predictors,
-                            burnable = rep(1, nrow(r_predictors)),
-                            ignition_cells = burning_cells,
-                            n_rowcol = c(nrow(r_predictors), ncol(r_predictors)),
-                            coef = coefs,
-                            moves = moves,
-                            wind_column = wind_column,
-                            elev_column = elev_column,
-                            distances = distances,
-                            angles = as.numeric(angles),
-                            upper_limit = 1.0) {
+# landscape raster
+size <- 30
+n_rows <- size
+n_cols <- size
 
-  ### definitions for testing
-  landscape = r_predictors
-  burnable = rep(1, nrow(r_predictors))
-  ignition_cells = burning_cells
-  n_rowcol = c(nrow(r_predictors), ncol(r_predictors))
-  coef = coefs
-  moves = moves
-  wind_column = wind_column
-  elev_column = elev_column
-  distances = distances
-  angles = as.numeric(angles)
+landscape <- rast(
+  ncol = n_cols, nrow = n_rows, 
+  nlyrs = length(coefs) - 2, # intercept and slope absent
+  xmin = -1000, xmax = 1000, ymin = -1000, ymax = 1000,
+  names = names(coefs)[-c(1, length(coefs))]
+)
+
+# fill vegetation
+veg_vals <-  rmultinom(ncell(landscape), size = 1, prob = rep(0.25, 4))[1:3, ] %>% t
+values(landscape)[, 1:3] <- veg_vals
+landscape$fwi <- rnorm(ncell(landscape))            # fwi anomalies
+landscape$aspect <- cos(runif(ncell(landscape), 0, 2 * pi) - 315 * pi / 180)  # northwestyness
+landscape$wind <- runif(ncell(landscape), 0, 2 * pi)    # wind direction in radians
+landscape$elev <- runif(ncell(landscape), 0, 2200)  # m above sea level
+
+# vector of distances and angles between a cell and its neighbours
+# (used to compute slope and wind effects)
+distances <- rep(res(landscape)[1], 8) # sides
+distances[c(1, 3, 6, 8)] <- res(landscape)[1] * sqrt(2)
+
+angles_matrix <- matrix(
+  c(315, 0, 45,
+    270, NA, 90,
+    225, 180, 135),
+  3, 3, byrow = TRUE) * pi / 180
+angles <- as.numeric(angles_matrix %>% t) %>% na.omit # in radians
+
+# make ignition point(s)
+ig_location <- cellFromRowCol(landscape, nrow(landscape) / 2, ncol(landscape) / 2)
+
+s <- round(runif(1, 1, 20000))
+
+set.seed(s)
+burn_result_r <- simulate_fire_r(
+  landscape = landscape,
+  burnable = rep(1, ncell(landscape)),
+  ignition_cells = ig_location,
+  n_rowcol = c(nrow(landscape), ncol(landscape)),
+  coef = coefs,
+  moves = moves,
+  wind_column = wind_column,
+  elev_column = elev_column,
+  distances = distances,
+  angles = as.numeric(angles),
   upper_limit = 1.0
-  ###
+)
 
-  n_row <- n_rowcol[1]
-  n_col <- n_rowcol[2]
-  n_cell <- n_row * n_col
+set.seed(s)
+burn_result_cpp <- simulate_fire_cpp(
+  landscape = values(landscape),      # to cpp we pass the values, not the raster
+  burnable = rep(1, ncell(landscape)),
+  ignition_cells = ig_location - 1,
+  n_rowcol = c(nrow(landscape), ncol(landscape)),
+  coef = unname(coefs),
+  moves = moves,
+  wind_column = wind_column - 1,
+  elev_column = elev_column - 1,
+  distances = distances,
+  angles = as.numeric(angles),
+  upper_limit = 1.0
+)
 
-  # // Create burn layer, which will be exported.
-  burn = rep(0, n_cell)
-  # // Fill the burn vector with 3 in the non-burnable pixels
-  burn[burnable == 0] <- 3
-  # // Set to 1 the ignition point
-  burn[ignition_cells] <- 1
+all.equal(burn_result_r, burn_result_cpp)
 
-  # // Get burning cells (initialized at the ignition point)
-  burning_cells <- ignition_cells
+# watch the spread :)    (completely unuseful for now)
 
-  # burn is the vector to hold the burned and burnable state;
-  # predictors_matrix si the raster of predictors into matrix form;
-  # n_rowcol is the number of rows and columns of the raster;
+coefs_plot <- coefs
+coefs_plot[1] <- 0
 
-  # spread
-  j = 1
-  while(length(burning_cells) > 0) {
-    # print(paste("cycle ", j, sep = ""))
+simulate_fire_plot(
+  landscape = landscape,
+  burnable = rep(1, ncell(landscape)),
+  ignition_cells = ig_location,
+  n_rowcol = c(nrow(landscape), ncol(landscape)),
+  coef = coefs_plot,
+  moves = moves,
+  wind_column = wind_column,
+  elev_column = elev_column,
+  distances = distances,
+  angles = as.numeric(angles),
+  upper_limit = 1.0
+)
 
-    # get cell id from neighbours
-    neighbours_matrix <- terra::adjacent(landscape,
-                                         cells = burning_cells,
-                                         directions = "queen")
-    #colnames(neighbours_matrix) <- 1:8
-
-    # spread from burning pixels
-    for(b in 1:length(burning_cells)) {
-      # b = 1
-      # print(paste("burning cell ", b, sep = ""))
-
-      #b = 1
-      # get neighbours available to burn (cell ids), while getting rid of
-      # non-existent neighbours
-
-      filter <- !is.na(neighbours_matrix[b, ]) &
-                burn[neighbours_matrix[b, ]] == 0
-      cols_use <- which(filter)
-      neighbours <- neighbours_matrix[b, cols_use]
-
-      # Subset required data from landscape
-      data_burning <- values(landscape)[burning_cells[b], , drop = FALSE]
-      data_neighbours <- values(landscape)[neighbours, , drop = FALSE]
-
-      # simulate spread
-      if(length(neighbours) > 0) {
-
-        burn[neighbours] <- spread_around_r(data_burning = data_burning,
-                                            data_neighbours = data_neighbours, # with column names!
-                                            coef = coef,
-                                            positions = cols_use, # position of valid neighbours
-                                            distances = distances,
-                                            angles = angles, # in radians
-                                            upper_limit = upper_limit)[, "burn"]
-      }
-
-    } # end loop over burning pixels
-
-    # update cycle step
-    j <- j + 1
-
-    # update: burning to burned
-    burn[burning_cells] <- 2
-
-    # update burning_cells
-    burning_cells <- which(burn == 1)
-  }
-
-  return(burn)
-}
+# code to plot with better colors (failure):
+# plot_colors <- data.frame(id = 0:3, 
+#                           col = c("green", "red", "black", "grey"))
+# lll <- landscape[[1]]
+# values(lll) <- sample(0:3, size = ncell(landscape), replace = TRUE)
+# plot(lll, col = plot_colors) ## tira error
+# class(lll)
 
 
+# Testing for effects in simulate_fire -------------------------------------
 
-# Test
-# sourceCpp("Spread function/spread_functions_2022-11-29.cpp")
-seed = runif(1, 1, 20000) %>% round
+# simulate landscapes where one layer varies and check that results are OK.
 
-# par(mfrow = c(1, 2))
+# vegetation tests # 
+
+landscape_base <- landscape
+landscape_base$subalpine <- 0
+landscape_base$wet <- 0
+landscape_base$dry <- 0 # it's all shrubland
+landscape_base$fwi <- 0
+landscape_base$aspect <- 0
+landscape_base$wind <- 0 # north wind
+landscape_base$elev <- elevation_mean
+
+# subalpine
+lands_sub <- landscape_base
+lands_sub$subalpine[1:(ncell(landscape)/2)] <- 1 # the northern half is subalpine
+c_sub <- coefs
+c_sub["subalpine"] <- -30 # subalpine is not flammable
+c_sub["intercept"] <- 10 # shrubland is very flammable
+c_sub["wind"] <- 0 # remove wind effect
+
+simulate_fire_plot(
+  landscape = lands_sub,
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  moves = moves,
+  wind_column = wind_column,
+  elev_column = elev_column,
+  distances = distances,
+  angles = as.numeric(angles),
+  upper_limit = 1.0
+) # good
+
+# wet
+lands_sub <- landscape_base
+lands_sub$wet[1:(ncell(landscape)/2)] <- 1 # the northern half is subalpine
+c_sub <- coefs
+c_sub["wet"] <- -12 # subalpine is not flammable
+c_sub["intercept"] <- 10 # shrubland is very flammable
+c_sub["wind"] <- 0 # remove wind effect
+
+simulate_fire_plot(
+  landscape = lands_sub,
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  moves = moves,
+  wind_column = wind_column,
+  elev_column = elev_column,
+  distances = distances,
+  angles = as.numeric(angles),
+  upper_limit = 1.0
+) # good
+
+
+# wind test
+lands_sub <- landscape_base
+c_sub <- rep(0, length(coefs))
+names(c_sub) <- names(coefs)
+c_sub["wind"] <- 5 # increase wind effect
+c_sub["intercept"] <- -2 
+
+
+
+
+
+## llegue hasta aca
+
+
+
+
+
+
+
+
+
+simulate_fire_plot(
+  landscape = lands_sub,
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  moves = moves,
+  wind_column = wind_column,
+  elev_column = elev_column,
+  distances = distances,
+  angles = as.numeric(angles),
+  upper_limit = 1.0
+) # good
+
+
+# OLD CODE  BELOW ------------------------------------------------------------------
+
 
 # set.seed(seed)
 # system.time(
