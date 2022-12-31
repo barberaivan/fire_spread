@@ -37,46 +37,45 @@ using namespace Rcpp;
  *
  */
 
-// -----------------------------------------------------------------------
+// Constants ---------------------------------------------------------------
 
+// Elevation data to standardize predictor
 double elevation_mean = 1163.3;
 double elevation_sd = 399.5;
 
-/*
- 
- // * I want to hard-code an IntegerMatrix here, moves, but I can't.
- // * Improve this later.
- // * It should be called "moves".
- 
-// [The R code:]
-// define queen neighbours
-// moves <- matrix(c(-1,-1,-1,  0,0,  1,1,1,
-//                   -1, 0, 1, -1,1, -1,0,1),
-//                   nrow = 2, byrow = TRUE)
+// Moves matrix to find neighbours (queen directions) of a pixel, used in
+// adjacent_ functions.
+IntegerVector moves_long = {-1,-1,-1,  0,0,  1,1,1,  // rows
+                            -1, 0, 1, -1,1, -1,0,1}; // cols
+IntegerMatrix moves_t(8, 2, moves_long.begin());
+IntegerMatrix moves = transpose(moves_t);
+/* In the case
+ * of a 8-pixels neighbourhood, it's a matrix with 2 rows (row and column
+ * values) and 8 columns. Its values are {-1, 0, 1}, so that when adding up
+ * the row-col ids of a cell and a column of moves, we get the row-col of a
+ * neighbour. They are oredered like this:
+ * 1 2 3
+ * 4   5
+ * 6 7 8
+ * For example, to get the neighbour 1, we compute
+ * focal_row - 1,
+ * focal_column - 1.
+ * The first column in moves is then
+ * -1
+ * -1
+ * (rows and columns are numbered from the upper-left corner.)
+ */
 
-// A few trials: 
- 
-// Rcpp::IntegerMatrix moves_cpp(2, 8);
-// 
-// moves_cpp(0, _) = {-1,-1,-1,  0,0,  1,1,1}; 
-// moves_cpp(1, _) = {-1, 0, 1, -1,1, -1,0,1};
-
-
-int moves[2][8] = {
-  {-1,-1,-1,  0,0,  1,1,1},
-  {-1, 0, 1, -1,1, -1,0,1}
+// Angles between cells to compute wind effect. As the wind direction is 
+// the direction from which the wind comes, these angles must represent where the
+// fire would come from if from the neighbours we look at the central pixel.
+NumericVector angles_raw = {
+  135, 180, 225,
+  90,       270,
+  45,   0,  315
 };
+NumericVector angles = angles_raw * M_PI / 180; // in radians!
 
-// [[Rcpp::export]]
-IntegerMatrix moves_cpp(2, 8);
-
-for(int j = 0; j < 8; j++) {
-  for(int i = 0; i < 2; i++) {
-    moves_cpp(i, j) = moves[i, j]
-  }
-}
- 
-*/
 
 // -----------------------------------------------------------------------
   
@@ -167,26 +166,10 @@ IntegerVector rowcol_to_cell_cpp0(IntegerMatrix rowcol, NumericVector n_rowcol) 
 //'   neighbours in columns. (8-pixels neighbourhood).
 //' @param IntegerVector cells: focal (burning) cell ids.
 //' @param NumericVector n_rowcol: number or row and columns of the landscape.
-//' @param IntegerMatrix moves: matrix defining the neighbourhood. In the case
-//'   of a 8-pixels neighbourhood, it's a matrix with 2 rows (row and column
-//'   values) and 8 columns. Its values are {-1, 0, 1}, so that when adding up
-//'   the row-col ids of a cell and a column of moves, we get the row-col of a
-//'   neighbour. They are oredered like this:
-//'   1 2 3
-//'   4   5
-//'   6 7 8
-//'   For example, to get the neighbour 1, we compute
-//'   focal_row -1,
-//'   focal_column - 1.
-//'   The first column in moves is then
-//'   -1
-//'   -1
-//'   (rows and columns are numbered from the upper-left corner.)
 
 // Adjacent function start 1
 // [[Rcpp::export]]
-IntegerMatrix adjacent_cpp(IntegerVector cells, IntegerVector n_rowcol,
-                           IntegerMatrix moves) {
+IntegerMatrix adjacent_cpp(IntegerVector cells, IntegerVector n_rowcol) {
 
   // get row and col from cell id
   IntegerMatrix row_col = cell_to_rowcol_cpp(as<NumericVector>(cells),
@@ -235,8 +218,7 @@ IntegerMatrix adjacent_cpp(IntegerVector cells, IntegerVector n_rowcol,
 
 // Adjacent function start 0
 // [[Rcpp::export]]
-IntegerMatrix adjacent_cpp0(IntegerVector cells, IntegerVector n_rowcol,
-                            IntegerMatrix moves) {
+IntegerMatrix adjacent_cpp0(IntegerVector cells, IntegerVector n_rowcol) {
 
   // get row and col from cell id
   IntegerMatrix row_col = cell_to_rowcol_cpp0(as<NumericVector>(cells),
@@ -294,8 +276,7 @@ IntegerMatrix adjacent_cpp0(IntegerVector cells, IntegerVector n_rowcol,
 //'   1s in the cells that are currently burning.
 
 // [[Rcpp::export]]
-IntegerMatrix adjacent_cpp0_2(IntegerVector burning, IntegerVector n_rowcol,
-                              IntegerMatrix moves) {
+IntegerMatrix adjacent_cpp0_2(IntegerVector burning, IntegerVector n_rowcol) {
 
   int n_cells = n_rowcol[0] * n_rowcol[1];
   IntegerVector cell_ids = seq(0, n_cells - 1);
@@ -387,9 +368,6 @@ IntegerMatrix adjacent_cpp0_2(IntegerVector burning, IntegerVector n_rowcol,
 //'   in the same order as positions. Used to compute the elevation effect.
 //'   This vector depends on the neighbourhood design and on the pixel scale.
 //'   If unchanged, it's always the same.
-//' @param NumericVector angles: angles (radians) between burning and target cells,
-//'   in the same order as positions. Used to compute the wind effect. This
-//'   vector is always the same, unless the neighborhood is changed.
 //' @param double upper_limit: upper limit for spread probability (setting to
 //'   1 makes absurdly large fires).
    
@@ -432,7 +410,6 @@ IntegerVector spread_around_cpp(NumericVector data_burning,
                                 int wind_column,
                                 int elev_column,
                                 NumericVector distances,
-                                NumericVector angles,
                                 double upper_limit = 1.0) {
 
   // burned or not vector to fill
@@ -483,8 +460,6 @@ IntegerVector spread_around_cpp(NumericVector data_burning,
 }
 
 
-
-
 // The same function but returning prob ----
 
 // [[Rcpp::export]]
@@ -495,7 +470,6 @@ NumericVector spread_around_prob_cpp(NumericVector data_burning,
                                      int wind_column,
                                      int elev_column,
                                      NumericVector distances,
-                                     NumericVector angles,
                                      double upper_limit = 1.0) {
 
   // burned or not vector to fill
@@ -581,9 +555,6 @@ NumericVector spread_around_prob_cpp(NumericVector data_burning,
 //'   in the same order as positions. Used to compute the elevation effect.
 //'   This vector depends on the neighbourhood design and on the pixel scale.
 //'   If unchanged, it's always the same.
-//' @param NumericVector angles: angles (radians) between burning and target cells,
-//'   in the same order as positions. Used to compute the wind effect. This
-//'   vector is always the same, unless the neighborhood is changed.
 //' @param double upper_limit: upper limit for spread probability (setting to
 //'   1 makes absurdly large fires).
 
@@ -593,11 +564,9 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
                                 IntegerVector burnable,      // burn layer in {0, ..., 3}, see code below
                                 IntegerVector n_rowcol,
                                 NumericVector coef,
-                                IntegerMatrix moves,
                                 int wind_column,
                                 int elev_column,
                                 NumericVector distances,
-                                NumericVector angles,
                                 double upper_limit) {
 
   int n_row = n_rowcol[0];
@@ -620,7 +589,7 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
   while(burning_size > 0) {
     // Get burning_cells' neighbours
     IntegerMatrix neighbours = adjacent_cpp0_2(burning,
-                                               n_rowcol, moves);
+                                               n_rowcol);
 
     // adjacent() needs a binary vector "burning", but once neighbours are obtained,
     // we turn the burning ones into 2, so we can differentiate new burns from
@@ -693,7 +662,6 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
           wind_column,
           elev_column,
           distances,
-          angles,
           upper_limit
         );
 
@@ -755,9 +723,6 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
 //'   in the same order as positions. Used to compute the elevation effect.
 //'   This vector depends on the neighbourhood design and on the pixel scale.
 //'   If unchanged, it's always the same.
-//' @param NumericVector angles: angles (radians) between burning and target cells,
-//'   in the same order as positions. Used to compute the wind effect. This
-//'   vector is always the same, unless the neighborhood is changed.
 //' @param double upper_limit: upper limit for spread probability (setting to
 //'   1 makes absurdly large fires).
 
@@ -769,11 +734,9 @@ IntegerVector simulate_fire_cpp_notadj(
     IntegerVector burnable,      // burn layer in {0, ..., 3}, see code below
     IntegerVector n_rowcol,
     NumericVector coef,
-    IntegerMatrix moves,
     int wind_column,
     int elev_column,
     NumericVector distances,
-    NumericVector angles,
     double upper_limit
   ) {
 
@@ -915,7 +878,6 @@ IntegerVector simulate_fire_cpp_notadj(
           wind_column,
           elev_column,
           distances,
-          angles,
           upper_limit
         );
 

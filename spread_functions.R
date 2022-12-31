@@ -25,12 +25,22 @@
 # Packages ----------------------------------------------------------------
 
 library(terra)
+library(tidyverse) # for pipe operator %>% 
 
 # Define a few constants ------------------------------------------------
 
 # Elevation metrics to standardize predictor
 elevation_mean <- 1163.3
 elevation_sd <- 399.5
+
+# Angles between cells to compute wind effect. As the wind direction is 
+# the direction from which the wind comes, these angles must represent where the
+# fire would come from if from the neighbours we look at the central pixel.
+angles <- c(
+    135, 180, 225,
+    90,       270,
+    45,   0,  315
+    ) * pi / 180   # in radians
 
 # queen neighbours movements
 moves <- matrix(c(-1,-1,-1,  0,0,  1,1,1,
@@ -73,27 +83,13 @@ rowcol_to_cell <- function(rowcol, n_rowcol) {
 
 
 #' @title adjacent_r
-#' @description Gets the cell id of the neighbours of focal (burning) cells. It
+#' @description Gets the cell id of the neighbours of focal (burning) cells,
+#'   considering only "queen" direction following terra naming. It
 #'   takes into account that neighbours can't fall outside the landscape.
 #' @return IntegerMatrix(number of focal cells, 8): focal cells in rows,
 #'   neighbours in columns. (8-pixels neighbourhood).
 #' @param IntegerVector cells: focal (burning) cell ids.
 #' @param NumericVector n_rowcol: number or row and columns of the landscape.
-#' @param IntegerMatrix moves: matrix defining the neighbourhood. In the case
-#'   of a 8-pixels neighbourhood, it's a matrix with 2 rows (row and column
-#'   values) and 8 columns. Its values are {-1, 0, 1}, so that when adding up
-#'   the row-col ids of a cell and a column of moves, we get the row-col of a
-#'   neighbour. They are oredered like this:
-#'   1 2 3
-#'   4   5
-#'   6 7 8
-#'   For example, to get the neighbour 1, we compute
-#'   focal_row -1,
-#'   focal_column - 1.
-#'   The first column in moves is then
-#'   -1
-#'   -1
-#'   (rows and columns are numbered from the upper-left corner.)
 
 adjacent_r <- function(cells, n_rowcol) {
   
@@ -127,7 +123,7 @@ adjacent_r <- function(cells, n_rowcol) {
       } else {
         neigh_cell[c, i] <- NA
       }
-    }
+    } 
   }
   
   return(neigh_cell)
@@ -203,7 +199,6 @@ spread_around_r <- function(data_burning,
                             coef,
                             positions = 1:8,
                             distances = distances,
-                            angles = angles,
                             upper_limit = 1) {
   
   # compute wind, elevation and slope terms 
@@ -263,7 +258,6 @@ spread_around_r <- function(data_burning,
 #'   depend on the angle and distance between burning and target pixels.
 #'   (Sometimes not all neighbours are burnable, so this vector will not
 #'   always be complete.)
-#' @param IntegerMatrix moves: see adjacent_cpp0 documentation.
 #' @param int wind_column: column in the data (landscape) with wind value.
 #' @param int elev_column: column in the data (landscape) with elevation value.
 #'   Wind and elevation columns must be the last 2.
@@ -282,11 +276,9 @@ simulate_fire_r <- function(landscape,
                             ignition_cells,
                             n_rowcol,
                             coef,
-                            moves = moves,
                             wind_column = wind_column,
                             elev_column = elev_column,
                             distances = distances,
-                            angles = as.numeric(angles),
                             upper_limit = 1.0) {
   
   n_row <- n_rowcol[1]
@@ -344,7 +336,6 @@ simulate_fire_r <- function(landscape,
                                             coef = coef,
                                             positions = cols_use, # position of valid neighbours
                                             distances = distances,
-                                            angles = angles, # in radians
                                             upper_limit = upper_limit)[, "burn"]
       }
       
@@ -374,11 +365,9 @@ simulate_fire_plot <- function(landscape,
                             ignition_cells,
                             n_rowcol,
                             coef,
-                            moves = moves,
                             wind_column = wind_column,
                             elev_column = elev_column,
                             distances = distances,
-                            angles = as.numeric(angles),
                             upper_limit = 1.0) {
   
   n_row <- n_rowcol[1]
@@ -405,7 +394,7 @@ simulate_fire_plot <- function(landscape,
   values(burn_raster)[burning_cells] <- 1
   # plot_colors <- data.frame(value = 0:3, color = c("green", "red", "black", "grey"))
   # plot(burn_raster, col = plot_colors) ## it does not work
-  plot(burn_raster, col = c("green", "red"))
+  plot(burn_raster, col = c("green", "red"), main = "step 0")
   
   # spread
   j = 1
@@ -444,14 +433,10 @@ simulate_fire_plot <- function(landscape,
                                             coef = coef,
                                             positions = cols_use, # position of valid neighbours
                                             distances = distances,
-                                            angles = angles, # in radians
                                             upper_limit = upper_limit)[, "burn"]
       }
       
     } # end loop over burning pixels
-    
-    # update cycle step
-    j <- j + 1
     
     # update: burning to burned
     burn[burning_cells] <- 2
@@ -462,7 +447,10 @@ simulate_fire_plot <- function(landscape,
     values(burn_raster)[burning_cells] <- 1
     
     # plot(burn_raster, col = plot_colors) # not worked
-    plot(burn_raster, col = c("green", "red", "black"))
+    plot(burn_raster, col = c("green", "red", "black"), main = paste("step", j))
+
+    # update cycle step
+    j <- j + 1
   }
   
   # make burned binary layer to return

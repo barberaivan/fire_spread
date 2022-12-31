@@ -71,9 +71,9 @@ matrix(1:prod(rowcol), byrow = TRUE, ncol = rowcol[2])
 matrix(1:prod(rowcol), byrow = TRUE, ncol = rowcol[2]) - 1
 
 adjacent_r(cell, rowcol)
-adjacent_cpp(cell, rowcol, moves)
+adjacent_cpp(cell, rowcol)
 terra::adjacent(rtest, cell, directions = "queen")
-adjacent_cpp0(cell - 1, rowcol, moves)
+adjacent_cpp0(cell - 1, rowcol)
 
 
 
@@ -117,17 +117,10 @@ landscape$aspect <- cos(runif(ncell(landscape), 0, 2 * pi) - 315 * pi / 180)  # 
 landscape$wind <- runif(ncell(landscape), 0, 2 * pi)    # wind direction in radians
 landscape$elev <- runif(ncell(landscape), 0, 2200)  # m above sea level
 
-# vector of distances and angles between a cell and its neighbours
-# (used to compute slope and wind effects)
+# vector of distances between a cell and its neighbours
+# (used to compute slope effect)
 distances <- rep(res(landscape)[1], 8) # sides
 distances[c(1, 3, 6, 8)] <- res(landscape)[1] * sqrt(2)
-
-angles_matrix <- matrix(
-  c(315, 0, 45,
-    270, NA, 90,
-    225, 180, 135),
-  3, 3, byrow = TRUE) * pi / 180
-angles <- as.numeric(angles_matrix %>% t) %>% na.omit # in radians
 
 # turn landscape into matrix
 predmat <- values(landscape)
@@ -151,7 +144,6 @@ spread_result_r <- spread_around_r(
   coef = coefs, 
   positions = pos,
   distances = distances,
-  angles = angles,
   upper_limit = 1
 )
 
@@ -162,7 +154,6 @@ spread_result_cpp_burn <- spread_around_cpp(
   coef = coefs, 
   positions = pos - 1, # -1 for 0-indexing
   distances = distances,
-  angles = angles,
   upper_limit = 1,
   wind_column = which(names(landscape) == "wind") - 1,
   elev_column = which(names(landscape) == "elev") - 1  # -1 for 0-indexing
@@ -174,7 +165,6 @@ spread_result_cpp_prob <- spread_around_prob_cpp(
   coef = coefs, 
   positions = pos - 1, # -1 for 0-indexing
   distances = distances,
-  angles = angles,
   upper_limit = 1,
   wind_column = which(names(landscape) == "wind") - 1,
   elev_column = which(names(landscape) == "elev") - 1  # -1 for 0-indexing
@@ -184,7 +174,6 @@ spread_result_cpp_prob <- spread_around_prob_cpp(
 all.equal(spread_result_r[, "probs"], spread_result_cpp_prob)
 all.equal(spread_result_r[, "burn"], spread_result_cpp_burn)
 # end
-
 
 
 # simulate_fire tests -----------------------------------------------------
@@ -227,17 +216,10 @@ landscape$aspect <- cos(runif(ncell(landscape), 0, 2 * pi) - 315 * pi / 180)  # 
 landscape$wind <- runif(ncell(landscape), 0, 2 * pi)    # wind direction in radians
 landscape$elev <- runif(ncell(landscape), 0, 2200)  # m above sea level
 
-# vector of distances and angles between a cell and its neighbours
-# (used to compute slope and wind effects)
+# vector of distances between a cell and its neighbours
+# (used to compute slope effect)
 distances <- rep(res(landscape)[1], 8) # sides
 distances[c(1, 3, 6, 8)] <- res(landscape)[1] * sqrt(2)
-
-angles_matrix <- matrix(
-  c(315, 0, 45,
-    270, NA, 90,
-    225, 180, 135),
-  3, 3, byrow = TRUE) * pi / 180
-angles <- as.numeric(angles_matrix %>% t) %>% na.omit # in radians
 
 # make ignition point(s)
 ig_location <- cellFromRowCol(landscape, nrow(landscape) / 2, ncol(landscape) / 2)
@@ -251,11 +233,23 @@ burn_result_r <- simulate_fire_r(
   ignition_cells = ig_location,
   n_rowcol = c(nrow(landscape), ncol(landscape)),
   coef = coefs,
-  moves = moves,
   wind_column = wind_column,
   elev_column = elev_column,
   distances = distances,
-  angles = as.numeric(angles),
+  upper_limit = 1.0
+)
+
+set.seed(s)
+# This function plots the spread, only useful for testing purposes
+burn_result_r_plot <- simulate_fire_plot(
+  landscape = landscape,
+  burnable = rep(1, ncell(landscape)),
+  ignition_cells = ig_location,
+  n_rowcol = c(nrow(landscape), ncol(landscape)),
+  coef = coefs,
+  wind_column = wind_column,
+  elev_column = elev_column,
+  distances = distances,
   upper_limit = 1.0
 )
 
@@ -266,42 +260,14 @@ burn_result_cpp <- simulate_fire_cpp(
   ignition_cells = ig_location - 1,
   n_rowcol = c(nrow(landscape), ncol(landscape)),
   coef = unname(coefs),
-  moves = moves,
   wind_column = wind_column - 1,
   elev_column = elev_column - 1,
   distances = distances,
-  angles = as.numeric(angles),
   upper_limit = 1.0
 )
 
+all.equal(burn_result_r, burn_result_r_plot)
 all.equal(burn_result_r, burn_result_cpp)
-
-# watch the spread :)    (completely unuseful for now)
-
-coefs_plot <- coefs
-coefs_plot[1] <- 0
-
-simulate_fire_plot(
-  landscape = landscape,
-  burnable = rep(1, ncell(landscape)),
-  ignition_cells = ig_location,
-  n_rowcol = c(nrow(landscape), ncol(landscape)),
-  coef = coefs_plot,
-  moves = moves,
-  wind_column = wind_column,
-  elev_column = elev_column,
-  distances = distances,
-  angles = as.numeric(angles),
-  upper_limit = 1.0
-)
-
-# code to plot with better colors (failure):
-# plot_colors <- data.frame(id = 0:3, 
-#                           col = c("green", "red", "black", "grey"))
-# lll <- landscape[[1]]
-# values(lll) <- sample(0:3, size = ncell(landscape), replace = TRUE)
-# plot(lll, col = plot_colors) ## tira error
-# class(lll)
 
 
 # Testing for effects in simulate_fire -------------------------------------
@@ -327,17 +293,16 @@ c_sub["subalpine"] <- -30 # subalpine is not flammable
 c_sub["intercept"] <- 10 # shrubland is very flammable
 c_sub["wind"] <- 0 # remove wind effect
 
+# Upper half is not flammable, lower is highly flammable
 simulate_fire_plot(
   landscape = lands_sub,
   burnable = rep(1, ncell(lands_sub)),
   ignition_cells = ig_location,
   n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
   coef = c_sub,
-  moves = moves,
   wind_column = wind_column,
   elev_column = elev_column,
   distances = distances,
-  angles = as.numeric(angles),
   upper_limit = 1.0
 ) # good
 
@@ -349,41 +314,28 @@ c_sub["wet"] <- -12 # subalpine is not flammable
 c_sub["intercept"] <- 10 # shrubland is very flammable
 c_sub["wind"] <- 0 # remove wind effect
 
+# Upper half is not flammable, lower is highly flammable
 simulate_fire_plot(
   landscape = lands_sub,
   burnable = rep(1, ncell(lands_sub)),
   ignition_cells = ig_location,
   n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
   coef = c_sub,
-  moves = moves,
   wind_column = wind_column,
   elev_column = elev_column,
   distances = distances,
-  angles = as.numeric(angles),
   upper_limit = 1.0
 ) # good
 
 
 # wind test
+wind_dir <- 270               # direction, in angles, from which the wind comes
 lands_sub <- landscape_base
+lands_sub$wind <- rep(wind_dir * pi / 180, ncell(lands_sub))
 c_sub <- rep(0, length(coefs))
 names(c_sub) <- names(coefs)
-c_sub["wind"] <- 5 # increase wind effect
-c_sub["intercept"] <- -2 
-
-
-
-
-
-## llegue hasta aca
-
-
-
-
-
-
-
-
+c_sub["wind"] <- 3 # increase wind effect
+c_sub["intercept"] <- 0 
 
 simulate_fire_plot(
   landscape = lands_sub,
@@ -391,71 +343,94 @@ simulate_fire_plot(
   ignition_cells = ig_location,
   n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
   coef = c_sub,
-  moves = moves,
   wind_column = wind_column,
   elev_column = elev_column,
   distances = distances,
-  angles = as.numeric(angles),
   upper_limit = 1.0
-) # good
+) 
 
 
-# OLD CODE  BELOW ------------------------------------------------------------------
+# slope test
+lands_sub <- landscape_base
+lands_sub$elev <- rep(seq(2000, 1000, length.out = nrow(lands_sub)),
+                      each = ncol(lands_sub)) # fill values by row
+c_sub <- rep(0, length(coefs))
+names(c_sub) <- names(coefs)
+c_sub["slope"] <- 3 # increase slope effect
+c_sub["intercept"] <- -1 
+
+# elevation increases from below, so the fire should spread upwards because of 
+# slope effect (elevation effect was removed.)
+simulate_fire_plot(
+  landscape = lands_sub,
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  wind_column = wind_column,
+  elev_column = elev_column,
+  distances = distances,
+  upper_limit = 1.0
+) 
 
 
-# set.seed(seed)
-# system.time(
-# burn_sim_r <- simulate_fire_r(landscape = r_predictors,
-#                               burnable = rep(1, nrow(r_predictors)),
-#                             ignition_cells = burning_cells,
-#                             n_rowcol = c(nrow(r_predictors), ncol(r_predictors)),
-#                             coef = coefs,
-#                             moves = moves,
-#                             wind_column = wind_column,
-#                             elev_column = elev_column,
-#                             distances = distances,
-#                             angles = as.numeric(angles),
-#                             upper_limit = 1.0)
-# )
-# burn_sim_rast_r <- r_veg
-# values(burn_sim_rast_r) <- burn_sim_r
-# plot(burn_sim_rast_r, main = "R")
+# elevation test
+lands_sub <- landscape_base
+lands_sub$elev <- rep(seq(2000, 1000, length.out = nrow(lands_sub)),
+                      each = ncol(lands_sub)) # fill values by row
+c_sub <- rep(0, length(coefs))
+names(c_sub) <- names(coefs)
+c_sub["elev"] <- -3 # high elevation effect (higher is less flammable)
+c_sub["intercept"] <- 1
 
-# sourceCpp("spread_functions.cpp")
-# set.seed(seed)
-# system.time(
-# burn_sim_cpp <- simulate_fire_cpp(landscape = values(r_predictors),
-#                                   burnable = rep(1, ncell(r_predictors)),
-#                                   ignition_cells = burning_cells - 1,
-#                                   n_rowcol = c(nrow(r_predictors), ncol(r_predictors)),
-#                                   coef = coefs,
-#                                   moves = moves,
-#                                   wind_column = wind_column - 1,
-#                                   elev_column = elev_column - 1,
-#                                   distances = distances,
-#                                   angles = as.numeric(angles),
-#                                   upper_limit = 1.0)
-# )
+# elevation increases from below, so the fire should spread downwards because of 
+# the elevation effect, which is negative. Here the slope effect was removed.
+simulate_fire_plot(
+  landscape = lands_sub,
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  wind_column = wind_column,
+  elev_column = elev_column,
+  distances = distances,
+  upper_limit = 1.0
+) 
 
-# burn_sim_rast_cpp <- r_veg
-# values(burn_sim_rast_cpp) <- burn_sim_cpp
-# plot(burn_sim_rast_cpp, main = "C++")
-# burn_sim_cpp
-# par(mfrow = c(1, 1))
+# aspect test
+lands_sub <- landscape_base
+lands_sub$aspect <- rep(seq(1, -1, length.out = nrow(lands_sub)),
+                        each = ncol(lands_sub)) # fill values by row
+c_sub <- rep(0, length(coefs))
+names(c_sub) <- names(coefs)
+c_sub["aspect"] <- 2 # increase aspect effect
+c_sub["intercept"] <- -1 
 
-# con size = 25, cpp tarda solo un 1 % de lo de R.
-# con size = 200, cpp tarda un 0.12 % de R. (833 : 1 relation)
-# con size = 100, cpp tarda un 0.42 % de R. (238 : 1 relation)
-#                                            258 : 1
-# con size = 1600 (~ 50 km de lado), cpp tarda un ___ % de R.
-#   más alla de lo que tarde R, lleva al menos 9 h y sigue corriendo
-#   (un solo fuego.) Tiene p re alta, o sea que quema casi todo el paisaje, pero
-#   igual no hay need de que tarde tanto. Y la RAM está por 4 Gb de uso,
-#   pero R avisa que usa ~ 1.4 por ahora.
+# Fire should spread upwards
+simulate_fire_plot(
+  landscape = lands_sub,
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  wind_column = wind_column,
+  elev_column = elev_column,
+  distances = distances,
+  upper_limit = 1.0
+) 
 
-# Tiempos cpp (s), quemando todo, paisaje cuadrado de size == ncol == nrow
-# 800,  11.477
-# 1600, 70.230  (es menos que al cuadrado)
+
+# Tests are OK. 
+
+
+
+
+
+#### OLD CODE BELOW, NOT TESTED ###########################################
+# (BENCHMARKS) ------------------------------------------------------------
+# When the data for all fires is downloaded and ready, check the RAM usage of 
+# the simulations. If we have RAM unused, we can test the function with 
+# precomputed neighbours.
 
 
 # Compare spread with and without precomputed neighbours ------------------
@@ -585,11 +560,9 @@ run_cpp_notadj <- function() {
     ignition_cells = burning_cells - 1,
     n_rowcol = c(nrow(r_predictors), ncol(r_predictors)),
     coef = coefs,
-    moves = moves,
     wind_column = wind_column - 1,
     elev_column = elev_column - 1,
     distances = distances,
-    angles = as.numeric(angles),
     upper_limit = 1.0)
 
   return(burn_sim_cpp_notadj)
@@ -601,11 +574,9 @@ run_cpp_adj <- function() {
                                     ignition_cells = burning_cells - 1,
                                     n_rowcol = c(nrow(r_predictors), ncol(r_predictors)),
                                     coef = coefs,
-                                    moves = moves,
                                     wind_column = wind_column - 1,
                                     elev_column = elev_column - 1,
                                     distances = distances,
-                                    angles = as.numeric(angles),
                                     upper_limit = 1.0)
 
   return(burn_sim_cpp)
