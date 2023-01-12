@@ -263,6 +263,55 @@ IntegerMatrix adjacent_cpp0(IntegerVector cells, IntegerVector n_rowcol) {
 }
 
 
+// Adjacent function start 0
+// In this case, returns a vector, used to compute neighbours from only one 
+// burning cell at the time.
+
+// [[Rcpp::export]]
+IntegerMatrix adjacent_vec_cpp0(IntegerVector cells, IntegerVector n_rowcol) {
+  
+  // get row and col from cell id
+  IntegerMatrix row_col = cell_to_rowcol_cpp0(as<NumericVector>(cells),
+                                              as<NumericVector>(n_rowcol));
+  // cast as numeric because that function needs numeric inputs.
+  
+  // Neighbours cells
+  IntegerMatrix neigh_cells(cells.length(), 8); // [burning_cells, neighbours]
+  
+  // get neighbours row_col for cell c
+  IntegerMatrix neigh_rc(2, 8); // [c(row, col), neighbours]
+  
+  // (loop over 8 neighbours)
+  for(int n = 0; n < 8; n++) {
+    neigh_rc(_, n) = row_col + moves(_, n); // neighbours row-column pairs
+  }
+  
+  // Write raw neighbours to result matrix (includes invalid ones)
+  neigh_cells(0, _) = rowcol_to_cell_cpp0(neigh_rc,
+                                          as<NumericVector>(n_rowcol));
+  
+  // Define valid neighbours values (not out of range)
+  IntegerVector valid_id(8);
+  
+  int lower = 0; // it's the lowest allowed row or column index (c++ indexing)
+  for(int n = 0; n < 8; n++) {
+    if(neigh_rc(0, n) >= lower & neigh_rc(0, n) < n_rowcol(0) &  // check rows
+       neigh_rc(1, n) >= lower & neigh_rc(1, n) < n_rowcol(1)) { // check columns
+      valid_id(n) = 1; // label as 1 the valid ones
+    }
+  }
+  
+  // Make NA the cell ID for invalid neighbours
+  for(int n = 0; n < 8; n++) {
+    if(valid_id(n) == 0)
+      neigh_cells(0, n) = NA_INTEGER;
+  }
+  
+  return neigh_cells;
+}
+
+
+
 // Adjacent function start 0, using the full binary vector <burning> instead
 // of burning_cells. It is used to avoid memory allocation problems.
 
@@ -523,11 +572,9 @@ NumericVector spread_around_prob_cpp(NumericVector data_burning,
 //' @title simulate_fire_cpp
 //' @description function to simulate a fire spread given the landscape,
 //'   model coefficients and ignition points.
-//' @return IntegerVector(n_row * n_col): updated burn layer, coded as
-//'   0 = not burned but burnable,
-//'   1 = burning (only occurs before the function runs),
-//'   2 = burned,
-//'   3 = not burnable.
+//' @return IntegerVector(n_row * n_col): burned layer, coded as
+//'   0 = not burned,
+//'   1 = burned.
 
 //' @param NumericMatrix landscape: environmental data from the whole landscape.
 //'   See description in spread_around.
@@ -558,8 +605,161 @@ NumericVector spread_around_prob_cpp(NumericVector data_burning,
 //' @param double upper_limit: upper limit for spread probability (setting to
 //'   1 makes absurdly large fires).
 
+
 // [[Rcpp::export]]
 IntegerVector simulate_fire_cpp(NumericMatrix landscape,
+                                IntegerVector ignition_cells,//
+                                IntegerVector burnable,      // burn layer in {0, ..., 3}, see code below
+                                IntegerVector n_rowcol,
+                                NumericVector coef,
+                                int wind_column,
+                                int elev_column,
+                                NumericVector distances,
+                                double upper_limit) {
+  
+  int n_row = n_rowcol[0];
+  int n_col = n_rowcol[1];
+  int n_cell = n_row * n_col;
+  
+  // burned_ids will be filled with the cell ids of the burning pixels. start
+  // and end integers will define the positions limits corresponding to the 
+  // burning cells in every burn cycle.
+  IntegerVector burned_ids(n_cell);
+  
+  int start = 0;
+  // end is the last non-empty position in the burned_ids vector.
+  int end = ignition_cells.length() - 1; 
+  // Example:
+  // burned_ids = {231, 455, 342, 243, NA, NA, NA, NA};
+  //               start          end.
+  // if only one cell is burning, start = end.
+  
+  // initialize burned_ids and burning_size with ignition_cells
+  burned_ids[seq(start, end)] = ignition_cells;
+  int burning_size = ignition_cells.length(); // == end + 1 - start
+  
+  // The burned_bin vector will indicate whether each pixel is burned or burning
+  // (1) or not (0). It's necessary to have this now because it will be used
+  // to define burnable neighbours.
+  IntegerVector burned_bin = rep(0, n_cell);
+  // initialize with ignition_cells
+  burned_bin[ignition_cells] = 1;
+  
+  // spread
+  while(burning_size > 0) {
+    // Loop over all the burning cells to burn their neighbours. Use end_forward
+    // to update the last position in burned_ids within this loop, without 
+    // compromising the loop's integrity.
+    int end_forward = end;
+    
+    // b is going to keep the position in burned_ids that have to be evaluated 
+    // in this burn cycle
+    for(int b = start; b <= end; b++) {
+      
+      // get id of focal burning cell
+      int focal_id = burned_ids[b];
+      Rcout << "focal_id:\n" << focal_id << "\n";
+      
+      
+      
+      
+      // Get burning_cells' data
+      NumericVector data_burning = landscape(focal_id, _);
+      
+      // get neighbours
+      IntegerVector neigh_b = adjacent_vec_cpp0(focal_id, n_rowcol);
+      // CAREFUL WITH VECTOR-MATRIX ASSIGNMENT
+      Rcout << "neigh_b:\n" << neigh_b << "\n";
+      
+      
+      
+      // Filter valid neighbours
+      IntegerVector positions = seq(0, 7);
+
+      // Make NA if the pixel is invalid
+      for(int n = 0; n < 8; n++) {
+        
+        bool out_of_range = neigh_b[n] == -2147483648; // it's NA for integers in cpp
+        
+        // First check if cell is out of range, because if true, we cant evaluate
+        // this cell in the {burning, burnable, burned} vectors
+        if(out_of_range) {
+          neigh_b[n] = NA_INTEGER;
+          positions[n] = NA_INTEGER;
+        }
+        // If it's in range, evaluate whether it's currently burnable
+        else {
+          bool burnable_cell = (burned_bin[neigh_b[n]] == 0) &
+                               (burnable[neigh_b[n]] == 1);
+          
+          if(!burnable_cell) {
+            neigh_b[n] = NA_INTEGER;
+            positions[n] = NA_INTEGER;
+          }
+        }
+      }
+      // remove NAs
+      neigh_b = na_omit(neigh_b);
+      positions = na_omit(positions);
+      
+      // If there are burnable neighbours, spread around
+      if(neigh_b.length() > 0) {
+        
+        // Get its valid neighbours' data
+        NumericMatrix data_neighbours(neigh_b.length(), landscape.ncol());
+        
+        for(int n = 0; n < neigh_b.length(); n++) {
+          data_neighbours(n, _) = landscape(neigh_b[n], _);
+        }
+        
+        // Spread fire towards neighbours 
+        IntegerVector burn_result(neigh_b.length());
+        
+        burn_result = spread_around_cpp(
+          data_burning,
+          data_neighbours,
+          coef,
+          positions, // columns of valid neighbours
+          wind_column,
+          elev_column,
+          distances,
+          upper_limit
+        );
+        
+        // store ids of recently burned cells and
+        // set ones in burned_bin
+        // (but advance end_forward first)
+        for(int i = 0; i < neigh_b.length(); i++) {
+          if(burn_result[i] == 1) {
+            end_forward += 1;
+            burned_ids[end_forward] = neigh_b[i];
+            burned_bin[neigh_b[i]] = 1;
+          }
+        }
+        
+      } // end if for length(neighbours > 0)
+      
+    } // end loop over burning cells
+    
+    // update start and end
+    start = end + 1;
+    end = end_forward;
+    burning_size = end - start + 1;
+    
+  } // end while
+  
+  return burned_bin;
+}
+
+
+/*
+ * simulate_fire_fool_cpp is probably a bad implementation of the function because
+ * it evaluates the whole burn and burning vector in every burn cycle (i.e.,
+ * iteration in the while loop).
+ */
+
+// [[Rcpp::export]]
+IntegerVector simulate_fire_fool_cpp(NumericMatrix landscape,
                                 IntegerVector ignition_cells,//
                                 IntegerVector burnable,      // burn layer in {0, ..., 3}, see code below
                                 IntegerVector n_rowcol,
@@ -727,7 +927,7 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
 //'   1 makes absurdly large fires).
 
 // [[Rcpp::export]]
-IntegerVector simulate_fire_cpp_notadj(
+IntegerVector simulate_fire_fool_cpp_notadj(
     NumericMatrix landscape,
     IntegerMatrix neighbours_matrix,
     IntegerVector ignition_cells,//

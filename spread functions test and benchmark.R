@@ -15,7 +15,6 @@ source("spread_functions.R")
 # compare the functions written in R by me, the ones from terra and the cpp ones
 # written with 0 and 1 indexing.
 
-# data for testing
 rowcol <- c(5, 6) # number of rows and columns of the landscape
 rtest <- rast(ncol = rowcol[2], nrow = rowcol[1],
               xmin = -1000, xmax = 1000,
@@ -74,7 +73,7 @@ adjacent_r(cell, rowcol)
 adjacent_cpp(cell, rowcol)
 terra::adjacent(rtest, cell, directions = "queen")
 adjacent_cpp0(cell - 1, rowcol)
-
+adjacent_vec_cpp0(cell - 1, rowcol)
 
 
 # spread_around test ------------------------------------------------------
@@ -254,6 +253,19 @@ burn_result_r_plot <- simulate_fire_plot(
 )
 
 set.seed(s)
+burn_result_cpp_fool <- simulate_fire_fool_cpp(
+  landscape = values(landscape),      # to cpp we pass the values, not the raster
+  burnable = rep(1, ncell(landscape)),
+  ignition_cells = ig_location - 1,
+  n_rowcol = c(nrow(landscape), ncol(landscape)),
+  coef = unname(coefs),
+  wind_column = wind_column - 1,
+  elev_column = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+)
+
+set.seed(s)
 burn_result_cpp <- simulate_fire_cpp(
   landscape = values(landscape),      # to cpp we pass the values, not the raster
   burnable = rep(1, ncell(landscape)),
@@ -265,6 +277,9 @@ burn_result_cpp <- simulate_fire_cpp(
   distances = distances,
   upper_limit = 1.0
 )
+
+# BROKEN 
+# adjacent_vec_cpp0 SEEMS TO CAUSE TROUBLE
 
 all.equal(burn_result_r, burn_result_r_plot)
 all.equal(burn_result_r, burn_result_cpp)
