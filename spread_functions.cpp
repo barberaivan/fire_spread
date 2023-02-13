@@ -268,7 +268,7 @@ IntegerMatrix adjacent_cpp0(IntegerVector cells, IntegerVector n_rowcol) {
 // burning cell at the time.
 
 // [[Rcpp::export]]
-IntegerMatrix adjacent_vec_cpp0(IntegerVector cells, IntegerVector n_rowcol) {
+IntegerVector adjacent_vec_cpp0(IntegerVector cells, IntegerVector n_rowcol) {
   
   // get row and col from cell id
   IntegerMatrix row_col = cell_to_rowcol_cpp0(as<NumericVector>(cells),
@@ -307,7 +307,11 @@ IntegerMatrix adjacent_vec_cpp0(IntegerVector cells, IntegerVector n_rowcol) {
       neigh_cells(0, n) = NA_INTEGER;
   }
   
-  return neigh_cells;
+  // Turn 1-row matrix into vector
+  IntegerVector result(8);
+  for(int i = 0; i < 8; i++) result[i] = neigh_cells(0, i);
+  
+  return result;
 }
 
 
@@ -624,7 +628,7 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
   // burned_ids will be filled with the cell ids of the burning pixels. start
   // and end integers will define the positions limits corresponding to the 
   // burning cells in every burn cycle.
-  IntegerVector burned_ids(n_cell);
+  IntegerVector burned_ids = rep(NA_INTEGER, n_cell); // filled with integer_NA
   
   int start = 0;
   // end is the last non-empty position in the burned_ids vector.
@@ -654,24 +658,26 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
     
     // b is going to keep the position in burned_ids that have to be evaluated 
     // in this burn cycle
+    
+    IntegerVector burned_ids_focal(burning_size);
+    burned_ids_focal = burned_ids[seq(start, end)];
+    
+    Rcout << "burned_ids in cycle:\n" << burned_ids_focal << "\n";
+    
+      
     for(int b = start; b <= end; b++) {
       
       // get id of focal burning cell
-      int focal_id = burned_ids[b];
+      IntegerVector focal_id(1);
+      focal_id[0] = burned_ids[b];
       Rcout << "focal_id:\n" << focal_id << "\n";
       
-      
-      
-      
       // Get burning_cells' data
-      NumericVector data_burning = landscape(focal_id, _);
+      NumericVector data_burning = landscape(focal_id[0], _);
       
       // get neighbours
       IntegerVector neigh_b = adjacent_vec_cpp0(focal_id, n_rowcol);
-      // CAREFUL WITH VECTOR-MATRIX ASSIGNMENT
       Rcout << "neigh_b:\n" << neigh_b << "\n";
-      
-      
       
       // Filter valid neighbours
       IntegerVector positions = seq(0, 7);
@@ -679,7 +685,7 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
       // Make NA if the pixel is invalid
       for(int n = 0; n < 8; n++) {
         
-        bool out_of_range = neigh_b[n] == -2147483648; // it's NA for integers in cpp
+        bool out_of_range = (neigh_b[n] == -2147483648); // it's NA for integers in cpp
         
         // First check if cell is out of range, because if true, we cant evaluate
         // this cell in the {burning, burnable, burned} vectors
@@ -698,6 +704,11 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
           }
         }
       }
+      
+      // check neigh_b is ok
+      Rcout << "neigh_b:\n" << neigh_b << "\n";
+      
+      
       // remove NAs
       neigh_b = na_omit(neigh_b);
       positions = na_omit(positions);
@@ -726,6 +737,8 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
           upper_limit
         );
         
+        Rcout << "burn_result:\n" << burn_result << "\n";
+        
         // store ids of recently burned cells and
         // set ones in burned_bin
         // (but advance end_forward first)
@@ -738,6 +751,9 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
         }
         
       } // end if for length(neighbours > 0)
+    
+    Rcout << "burned_ids last:\n" << burned_ids[end_forward] << "\n";
+      
       
     } // end loop over burning cells
     
@@ -745,6 +761,10 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
     start = end + 1;
     end = end_forward;
     burning_size = end - start + 1;
+    
+    
+    Rcout << "burning_size:\n" << burning_size << "\n";
+    
     
   } // end while
   

@@ -283,6 +283,11 @@ burn_result_cpp <- simulate_fire_cpp(
 
 all.equal(burn_result_r, burn_result_r_plot)
 all.equal(burn_result_r, burn_result_cpp)
+all.equal(burn_result_cpp_fool, burn_result_cpp)
+
+adjacent_vec_cpp0(89, c(nrow(landscape), ncol(landscape)))
+
+sourceCpp("spread_functions.cpp")
 
 
 # Testing for effects in simulate_fire -------------------------------------
@@ -321,6 +326,21 @@ simulate_fire_plot(
   upper_limit = 1.0
 ) # good
 
+bb <- simulate_fire_cpp(
+  landscape = values(lands_sub),
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location - 1,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  wind_column = wind_column - 1,
+  elev_column = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+) # good
+landscape_base2 <- landscape_base[[1]]
+values(landscape_base2) <- bb
+plot(landscape_base2)
+
 # wet
 lands_sub <- landscape_base
 lands_sub$wet[1:(ncell(landscape)/2)] <- 1 # the northern half is subalpine
@@ -341,6 +361,35 @@ simulate_fire_plot(
   distances = distances,
   upper_limit = 1.0
 ) # good
+bb <- simulate_fire_cpp(
+  landscape = values(lands_sub),
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location - 1,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  wind_column = wind_column - 1,
+  elev_column = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+) # good
+landscape_base2 <- landscape_base[[1]]
+values(landscape_base2) <- bb
+plot(landscape_base2)
+
+
+
+
+
+# parece que la función anda bien, pero no genera los mismos --------------
+# números aleatorios. eso es sospechoso. chequear printeando vecinos, 
+# probs y resultado de R::bin()
+
+
+
+
+
+
+
 
 
 # wind test
