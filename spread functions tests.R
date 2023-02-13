@@ -384,6 +384,18 @@ plot(landscape_base2)
 # números aleatorios. eso es sospechoso. chequear printeando vecinos, 
 # probs y resultado de R::bin()
 
+# Es probable que pase lo siguiente: la función fool obtiene los vecinos a partir
+# de un vector de burning:
+# focal_cells = burning[burning == 1],
+# por lo que las focal_cells on obtenidas en el orden de sus ids. En cambio, 
+# con la nueva función, cada focal_cell es evaluada en el orden de quema. Esto 
+# hace que las cosas no ocurran en el mismo orden, pero que todo funcione.
+
+# Chequear que los patrones físicos funcionan comparando gráficamente. 
+# Luego, testear que esto esté pasando printeando vecinos y focal cells 
+# con ambas funciones de c++.
+# Finalmente, escribir una función de R que sea igual a la nueva de c++ para 
+# poder testear contra R.
 
 
 
@@ -413,6 +425,21 @@ simulate_fire_plot(
   upper_limit = 1.0
 ) 
 
+bb <- simulate_fire_cpp(
+  landscape = values(lands_sub),
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location - 1,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  wind_column = wind_column - 1,
+  elev_column = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+) # good
+landscape_base2 <- landscape_base[[1]]
+values(landscape_base2) <- bb
+plot(landscape_base2)
+
 
 # slope test
 lands_sub <- landscape_base
@@ -436,6 +463,23 @@ simulate_fire_plot(
   distances = distances,
   upper_limit = 1.0
 ) 
+
+bb <- simulate_fire_cpp(
+  landscape = values(lands_sub),
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location - 1,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  wind_column = wind_column - 1,
+  elev_column = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+) # good
+landscape_base2 <- landscape_base[[1]]
+values(landscape_base2) <- bb
+plot(landscape_base2)
+
+
 
 
 # elevation test
@@ -461,6 +505,25 @@ simulate_fire_plot(
   upper_limit = 1.0
 ) 
 
+
+bb <- simulate_fire_cpp(
+  landscape = values(lands_sub),
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location - 1,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  wind_column = wind_column - 1,
+  elev_column = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+) # good
+landscape_base2 <- landscape_base[[1]]
+values(landscape_base2) <- bb
+plot(landscape_base2)
+
+
+
+
 # aspect test
 lands_sub <- landscape_base
 lands_sub$aspect <- rep(seq(1, -1, length.out = nrow(lands_sub)),
@@ -483,6 +546,21 @@ simulate_fire_plot(
   upper_limit = 1.0
 ) 
 
+
+bb <- simulate_fire_cpp(
+  landscape = values(lands_sub),
+  burnable = rep(1, ncell(lands_sub)),
+  ignition_cells = ig_location - 1,
+  n_rowcol = c(nrow(lands_sub), ncol(lands_sub)),
+  coef = c_sub,
+  wind_column = wind_column - 1,
+  elev_column = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+) # good
+landscape_base2 <- landscape_base[[1]]
+values(landscape_base2) <- bb
+plot(landscape_base2)
 
 # Tests are OK. 
 

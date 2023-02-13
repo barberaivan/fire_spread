@@ -662,7 +662,7 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
     IntegerVector burned_ids_focal(burning_size);
     burned_ids_focal = burned_ids[seq(start, end)];
     
-    Rcout << "burned_ids in cycle:\n" << burned_ids_focal << "\n";
+    // Rcout << "burned_ids in cycle:\n" << burned_ids_focal << "\n";
     
       
     for(int b = start; b <= end; b++) {
@@ -670,14 +670,14 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
       // get id of focal burning cell
       IntegerVector focal_id(1);
       focal_id[0] = burned_ids[b];
-      Rcout << "focal_id:\n" << focal_id << "\n";
+      // Rcout << "focal_id:\n" << focal_id << "\n";
       
       // Get burning_cells' data
       NumericVector data_burning = landscape(focal_id[0], _);
       
       // get neighbours
       IntegerVector neigh_b = adjacent_vec_cpp0(focal_id, n_rowcol);
-      Rcout << "neigh_b:\n" << neigh_b << "\n";
+      // Rcout << "neigh_b:\n" << neigh_b << "\n";
       
       // Filter valid neighbours
       IntegerVector positions = seq(0, 7);
@@ -706,7 +706,7 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
       }
       
       // check neigh_b is ok
-      Rcout << "neigh_b:\n" << neigh_b << "\n";
+      // Rcout << "neigh_b:\n" << neigh_b << "\n";
       
       
       // remove NAs
@@ -737,7 +737,7 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
           upper_limit
         );
         
-        Rcout << "burn_result:\n" << burn_result << "\n";
+        // Rcout << "burn_result:\n" << burn_result << "\n";
         
         // store ids of recently burned cells and
         // set ones in burned_bin
@@ -752,7 +752,7 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
         
       } // end if for length(neighbours > 0)
     
-    Rcout << "burned_ids last:\n" << burned_ids[end_forward] << "\n";
+    // Rcout << "burned_ids last:\n" << burned_ids[end_forward] << "\n";
       
       
     } // end loop over burning cells
@@ -763,7 +763,7 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
     burning_size = end - start + 1;
     
     
-    Rcout << "burning_size:\n" << burning_size << "\n";
+    // Rcout << "burning_size:\n" << burning_size << "\n";
     
     
   } // end while
