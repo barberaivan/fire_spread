@@ -1,4 +1,12 @@
 #include <Rcpp.h>
+#include <RcppArmadillo/Lightest> // new 'lighter' header
+// armadillo used for the matrix represetntaion of the rasters, to use the
+// cube data type.
+
+// Useful armadillo links
+//   https://dcgerard.github.io/advancedr/08_cpp_armadillo.html
+//   https://arma.sourceforge.net/docs.html#subcube
+
 using namespace Rcpp;
 
 /*
@@ -75,6 +83,13 @@ NumericVector angles_raw = {
   45,   0,  315
 };
 NumericVector angles = angles_raw * M_PI / 180; // in radians!
+
+
+// neighbours postions relative to the central (donor) pixel:
+IntegerVector positions = seq(0, 7);
+// 0 1 2
+// 3   4
+// 5 6 7
 
 
 // -----------------------------------------------------------------------
@@ -566,6 +581,86 @@ NumericVector spread_around_prob_cpp(NumericVector data_burning,
   return prob; // Used to check whether it matches the R function
 }
 
+// --------------------------------------------------------------------------
+
+//' @title spread_onepix_cpp
+//' @description Spreads fire from a burning cell to just one neighbour. It's
+//'   just a not-vectorized version of spread_around_cpp.
+//' @return int burn {0, 1} indicating whether the pixel burned or not.
+//' 
+//' @param arma::vec data_burning: environmental data from burning cell.
+//' @param arma::vec data_neighbours: environmental data from target neighbours.
+//' @param NumericVector coef: parameters in logistic regression to compute the
+//'   spread probability as a function of covariates. It has one more elements
+//'   than the columns of data_ because it includes the intercept.
+//' @param IntegerVector position: relative position of the neighbour in
+//'   relation to the burning cell. The eight neighbours are labelled from 0 to
+//'   7 beggining from the upper-left one (by row):
+//'   0 1 2
+//'   3   4
+//'   5 6 7.
+//'   This is necessary to compute the elevation and wind effects, as they
+//'   depend on the angle and distance between burning and target pixels.
+//' @param int wind_column: column in the data (landscape) with wind value.
+//' @param int elev_column: column in the data (landscape) with elevation value.
+//'   Wind and elevation columns must be the last 2.
+//' @param NumericVector distances: distances (m) between burning and target cells,
+//'   in the same order as positions. Used to compute the elevation effect.
+//'   This vector depends on the neighbourhood design and on the pixel scale.
+//'   If unchanged, it's always the same.
+//' @param double upper_limit: upper limit for spread probability (setting to
+//'   1 makes absurdly large fires).
+
+//' For further comments see documentation for spread_around_cpp.
+
+// [[Rcpp::export]]
+int spread_onepix_cpp(arma::vec data_burning,
+                      arma::vec data_neighbour,
+                      NumericVector coef,
+                      int position,
+                      int wind_column,
+                      int elev_column,
+                      double distance,
+                      double upper_limit = 1.0) {
+  
+  // compute elevation, slope and wind effects
+  
+  // slope (from elevation)
+  double slope_term = sin(atan(
+    (data_neighbour(elev_column) - data_burning(elev_column)) / distance
+    ));
+    
+  // wind term
+  double wind_term = cos(angles(position) - data_burning(wind_column));
+    
+  // elevation term (standardize predictor)
+  double elev_term = (data_neighbour(elev_column) - elevation_mean) / elevation_sd;
+    
+  // compute probability
+  double linpred = coef(0); // linear predictor, initialize as intercept.
+  // (the design matrix lacks the intercept column.)
+  // All the effects besides elevation, slope and slope:
+  for(int k = 0; k < (data_neighbour.size() - 2); k++) {
+    linpred += coef(k+1) * data_neighbour(k);
+  }
+  
+  // (coef is lagged ahead wrt the data_neighbours because it has the intercept,
+  // which is not present in the data.)
+  // Add elevation, slope and wind effects
+  linpred += wind_term * coef[wind_column + 1] +  
+    elev_term * coef[elev_column + 1] + 
+    slope_term * coef[elev_column + 2]; // slope coef is after the elevation one
+  
+  double prob = upper_limit / (1 + exp(-linpred));
+    
+  // Simulate the spread
+  int burn = R::rbinom(1.0, prob);
+  
+  return burn;
+
+}
+
+
 
 
 // -----------------------------------------------------------------------
@@ -658,13 +753,6 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
     
     // b is going to keep the position in burned_ids that have to be evaluated 
     // in this burn cycle
-    
-    IntegerVector burned_ids_focal(burning_size);
-    burned_ids_focal = burned_ids[seq(start, end)];
-    
-    // Rcout << "burned_ids in cycle:\n" << burned_ids_focal << "\n";
-    
-      
     for(int b = start; b <= end; b++) {
       
       // get id of focal burning cell
@@ -770,6 +858,189 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
   
   return burned_bin;
 }
+
+// -----------------------------------------------------------------------
+
+// function to simulate a fire spread given the landscape,
+// model coefficients and ignition points. 
+// In this case, use a matrix representation of the landscape to avoid shifting
+// from cell to rowcol and backwards when the neighbours are computed.
+
+
+// NOT EDITED, it's not trivial to work with arrays in Rcpp, so I leave it for
+// another time.
+
+
+//' @title simulate_fire_mat_cpp
+//' @description function to simulate a fire spread given the landscape,
+//'   model coefficients and ignition points.
+//' @return IntegerVector(n_row, n_col): burned layer, coded as
+//'   0 = not burned,
+//'   1 = burned.
+//'   This vector is converted from the burned layer (which is a matrix) by row,
+//'   as terra does.
+
+//' @param List landscape: environmental data from the whole landscape.
+//'   See description in spread_around. Every element in the list is a layer in 
+//'   matrix representation, with rows and columns displayed as they are in the
+//'   landscape (not transposed!).
+//' @param IntegerMatrix ignition_cells(2, burning_cells): row and column id for 
+//'   the cell(s) where the fire begun. First row has the row_id, second row has
+//'   the col_id.
+//' @param IntegeMatrix burnable: matrix indicating if each pixel is burnable (1)
+//'   or not (0).
+//' @param NumericVector coef: parameters in logistic regression to compute the
+//'   spread probability as a function of covariates.
+//' @param IntegerVector positions: position of each neighbour in
+//'   relation to the burning cell. The eight neighbours are labelled from 0 to
+//'   7 beginning from the upper-left corner (by row):
+//'   0 1 2
+//'   3   4
+//'   5 6 7.
+//'   This is necessary to compute the elevation and wind effects, as they
+//'   depend on the angle and distance between burning and target pixels.
+//'   (Sometimes not all neighbours are burnable, so this vector will not
+//'   always be complete.)
+//' @param IntegerMatrix moves: see adjacent_cpp0 documentation.
+//' @param int wind_layer: layer in the data (landscape) with wind matrix.
+//' @param int elev_layer: layer in the data (landscape) with elevation matrix.
+//'   Wind and elevation layers must be the last 2.
+//' @param NumericVector distances: distances (m) between burning and target cells,
+//'   in the same order as positions. Used to compute the elevation effect.
+//'   This vector depends on the neighbourhood design and on the pixel scale.
+//'   If unchanged, it's always the same.
+//' @param double upper_limit: upper limit for spread probability (setting to
+//'   1 makes absurdly large fires).
+
+
+// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::export]]
+IntegerVector simulate_fire_mat_cpp(arma::cube landscape,
+                                    IntegerMatrix ignition_cells,
+                                    IntegerMatrix burnable,      
+                                    NumericVector coef,
+                                    int wind_layer,
+                                    int elev_layer,
+                                    NumericVector distances,
+                                    double upper_limit) {
+  
+  int n_row = burnable.nrow();
+  int n_col = burnable.ncol();
+  int n_cell = n_row * n_col;
+  
+  // burned_ids [row-col, cell] will be filled with the row_col ids (rows) of the 
+  // burning pixels (columns). start and end integers will define the positions 
+  // limits corresponding to the burning cells in every burn cycle.
+  IntegerMatrix burned_ids(2, n_cell, NA_INTEGER); // check it's filled with NA
+
+  int start = 0;
+  // end is the last non-empty position in the burned_ids matrix.
+  int end = ignition_cells.ncol() - 1; 
+  // Example:
+  // burned_ids = {231, 455, 342, 243, NA, NA, NA, NA};
+  //               start          end.
+  // if only one cell is burning, start = end.
+  
+  // initialize burned_ids and burning_size with ignition_cells
+  for(int c = 0; c <= end; c++) {
+    for(int r = 0; r < 2; r++) {
+      burned_ids(r, c) = ignition_cells(r, c);
+    } 
+  }
+  
+  // initialize burning_size
+  int burning_size = ignition_cells.ncol(); // == end + 1 - start
+  
+  // The burned_bin matrix will indicate whether each pixel is burned or burning
+  // (1) or not (0). It's necessary to have this now because it will be used
+  // to define burnable neighbours.
+  IntegerMatrix burned_bin(n_row, n_col, 0);
+  // initialize with ignition_cells
+  for(int i = 0; i <= end; i++) {
+    burned_bin[ignition_cells(0, i), ignition_cells(1, i)] = 1;
+  }
+  // arma::mat burned_bin_m(n_row, n_col, arma::fill::zeros);
+  // burned_bin_m(ignition_cells(0, _), ignition_cells(1, _)) = 1; // NO ANDA
+    
+  while(burning_size > 0) {
+    // Loop over all the burning cells to burn their neighbours. Use end_forward
+    // to update the last position in burned_ids within this loop, without 
+    // compromising the loop's integrity.
+    int end_forward = end;
+    
+    // Loop over burning cells in the cycle
+    
+    // b is going to keep the position in burned_ids that have to be evaluated 
+    // in this burn cycle
+    for(int b = start; b <= end; b++) {
+  
+      // Get burning_cells' data
+      arma::vec data_burning = landscape.tube(burned_ids(0, b), burned_ids(1, b));
+      
+      // get neighbours (adjacent computation here)
+      IntegerMatrix neighbours(2, 8);
+      for(int i = 0; i < 8; i++) neighbours(_, i) = burned_ids(_, b) + moves(_, i);
+      
+      // Loop over neighbours of the focal burning cell 
+      
+      for(int n = 0; n < 8; n++) {
+        
+        // Is the cell in range?
+        bool out_of_range = (
+          (neighbours(0, n) < 0) | (neighbours(0, n) >= n_row) | // check rows
+          (neighbours(1, n) < 0) | (neighbours(1, n) >= n_col)   // check cols
+        ); 
+        if(out_of_range) continue; // (jumps to next iteration if TRUE)
+        
+        // Is the cell burnable?
+        bool burnable_cell = (burned_bin(neighbours(0, n), neighbours(1, n)) == 0) &
+                             (burnable(neighbours(0, n), neighbours(1, n)) == 1);
+        if(!burnable_cell) continue;
+        
+        // obtain data from the neighbour
+        arma::vec data_neighbour = landscape.tube(neighbours(0, n), neighbours(1, n));
+          
+        // simulate fire
+        int burn = spread_onepix_cpp(
+          data_burning,
+          data_neighbour,
+          coef,
+          n,           // pixel position identifier (for wind and slope effects)
+          wind_layer,
+          elev_layer,
+          distances[n],
+          upper_limit
+        );
+        
+        if(burn == 0) continue;
+        
+        // If burned,
+        // store id of recently burned cell and
+        // set 1 in burned_bin
+        // (but advance end_forward first)
+        end_forward += 1;
+        burned_ids(0, end_forward) = neighbours(0, n);
+        burned_ids(1, end_forward) = neighbours(1, n);
+        burned_bin(neighbours(0, n), neighbours(1, n)) = 1;
+      } // end loop over neighbours of burning cell b
+    
+    } // end loop over burning cells from this cycle
+    
+    // update start and end
+    start = end + 1;
+    end = end_forward;
+    burning_size = end - start + 1;
+    // Rcout << "burning_size:\n" << burning_size << "\n";
+    
+  } // end while
+  
+  return burned_bin;
+}
+
+ 
+ 
+
+// --------------------------------------------------------------------------
 
 
 /*
