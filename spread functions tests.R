@@ -175,6 +175,56 @@ all.equal(spread_result_r[, "burn"], spread_result_cpp_burn)
 # end
 
 
+
+# spread_onepix test ------------------------------------------------------
+
+# start
+burning_cell <- sample(1:ncell(landscape), size = 1)
+neighs_raw <- adjacent(landscape, 1, "queen") %>% as.numeric
+not_na <- !is.na(neighs_raw)
+pos <- (1:8)[not_na]
+neighs_id <- neighs_raw[not_na]
+
+s <- round(runif(1, 0, 10000)) # get seed
+set.seed(s) # set seed to compare the random simulation for burning
+spread_result_r <- spread_onepix_r(
+  data_burning = predmat[burning_cell, , drop = T], # USE DROP!!
+  data_neighbour = predmat[neighs_id[1], , drop = T],
+  coef = coefs, 
+  position = pos[1],
+  distances = distances,
+  upper_limit = 1
+)
+
+set.seed(s)
+spread_result_cpp_burn <- spread_onepix_cpp(
+  data_burning = predmat[burning_cell, , drop = F], # USE DROP!!
+  data_neighbour = predmat[neighs_id[1], , drop = F],
+  coef = coefs, 
+  position = pos[1] - 1, # -1 for 0-indexing
+  distance = distances[pos[1]],
+  upper_limit = 1,
+  wind_column = which(names(landscape) == "wind") - 1,
+  elev_column = which(names(landscape) == "elev") - 1  # -1 for 0-indexing
+)
+
+spread_result_cpp_prob <- spread_onepix_prob_cpp(
+  data_burning = predmat[burning_cell, , drop = F], # USE DROP!!
+  data_neighbour = predmat[neighs_id[1], , drop = F],
+  coef = coefs, 
+  position = pos[1] - 1, # -1 for 0-indexing
+  distance = distances[pos[1]],
+  upper_limit = 1,
+  wind_column = which(names(landscape) == "wind") - 1,
+  elev_column = which(names(landscape) == "elev") - 1  # -1 for 0-indexing
+)
+
+
+spread_result_r["burn"]; spread_result_cpp_burn
+spread_result_r["probs"]; spread_result_cpp_prob
+# OK, anda.
+
+
 # simulate_fire tests -----------------------------------------------------
 
 
@@ -278,16 +328,9 @@ burn_result_cpp <- simulate_fire_cpp(
   upper_limit = 1.0
 )
 
-# BROKEN 
-# adjacent_vec_cpp0 SEEMS TO CAUSE TROUBLE
-
 all.equal(burn_result_r, burn_result_r_plot)
-all.equal(burn_result_r, burn_result_cpp)
-all.equal(burn_result_cpp_fool, burn_result_cpp)
-
-adjacent_vec_cpp0(89, c(nrow(landscape), ncol(landscape)))
-
-sourceCpp("spread_functions.cpp")
+all.equal(burn_result_r, burn_result_cpp_fool)
+all.equal(burn_result_cpp_fool, burn_result_cpp) ## not equal
 
 
 # Testing for effects in simulate_fire -------------------------------------
@@ -377,31 +420,7 @@ values(landscape_base2) <- bb
 plot(landscape_base2)
 
 
-
-
-
-# parece que la función anda bien, pero no genera los mismos --------------
-# números aleatorios. eso es sospechoso. chequear printeando vecinos, 
-# probs y resultado de R::bin()
-
-# Es probable que pase lo siguiente: la función fool obtiene los vecinos a partir
-# de un vector de burning:
-# focal_cells = burning[burning == 1],
-# por lo que las focal_cells on obtenidas en el orden de sus ids. En cambio, 
-# con la nueva función, cada focal_cell es evaluada en el orden de quema. Esto 
-# hace que las cosas no ocurran en el mismo orden, pero que todo funcione.
-
-# Chequear que los patrones físicos funcionan comparando gráficamente. 
-# Luego, testear que esto esté pasando printeando vecinos y focal cells 
-# con ambas funciones de c++.
-# Finalmente, escribir una función de R que sea igual a la nueva de c++ para 
-# poder testear contra R.
-
-
-
-
-
-
+# -----
 
 
 # wind test
@@ -545,8 +564,6 @@ simulate_fire_plot(
   distances = distances,
   upper_limit = 1.0
 ) 
-
-
 bb <- simulate_fire_cpp(
   landscape = values(lands_sub),
   burnable = rep(1, ncell(lands_sub)),
@@ -562,190 +579,171 @@ landscape_base2 <- landscape_base[[1]]
 values(landscape_base2) <- bb
 plot(landscape_base2)
 
-# Tests are OK. 
+
+# Why do simulate_fire and simulate_fire_fool differ? ---------------------
+
+# parece que la función anda bien, pero no genera los mismos
+# números aleatorios. 
+
+# Es probable que pase lo siguiente: la función fool obtiene los vecinos a partir
+# de un vector de burning:
+# focal_cells = burning[burning == 1],
+# por lo que las focal_cells on obtenidas en el orden de sus ids. En cambio, 
+# con la nueva función, cada focal_cell es evaluada en el orden de quema. Esto 
+# hace que las cosas no ocurran en el mismo orden, pero que todo funcione.
+
+# Chequear que los patrones físicos funcionan comparando gráficamente. 
+# Luego, testear que esto esté pasando printeando vecinos y focal cells 
+# con ambas funciones de c++.
+# Finalmente, escribir una función de R que sea igual a la nueva de c++ para 
+# poder testear contra R.
+
+# To test this I hacked the functions to terminate after just one burn cycle 
+# (making burning_size = 0). I asked the neighbours to be printed, and provided
+# unordered ignition cells. The fool version evaluates neighbours by subsetting
+# the cell_ids[n_cell] vector as cell_ids[burning == 1]. In this way, the 
+# burning cells and the neighbours are ordered. However, the clever function
+# does not evaluate the whole burning vector but it just evaluates the burning
+# cells in the order that is provided. Running just 1 burn cycle, they are only 
+# the burning cells, so we could test this by giving unordered ignition points.
+# after this, the code was deleted.
+
+# order check for seeds:
+s <- round(runif(1, 10, 1e5))
+set.seed(s)
+rbinom(2, size = 1, prob = c(0.5, 0.5))
+set.seed(1)
+rbinom(2, size = 1, prob = c(0.5, 0.5))
+
+s <- round(runif(1, 10, 1e5))
+set.seed(s)
+rnorm(2, mean = c(0, 10))
+set.seed(1)
+rnorm(2, mean = c(10, 0))
+
+# order matters for seeds.
+
+# simulate_fire_mat -------------------------------------------------------
 
 
+# version of simulate_fire that uses a matrix representation of the landscape
+# to avoid extra computations when obtaining the neighbours.
 
+# create data for testing
+# model coefficients (includes intercept)
+coefs <- c(0.5, 
+           -1.5, -1.3, -0.5, 
+           1, 1, 1, 1, 1)
+names(coefs) <- c("intercept", 
+                  "subalpine", "wet", "dry",
+                  "fwi", 
+                  "aspect", 
+                  "wind", 
+                  "elev",
+                  "slope")
+### IMPORTANT  ---> wind, elevation and slope parameters must be the last ones.
 
+elev_column <- which(names(coefs) == "elev") - 1
+wind_column <- which(names(coefs) == "wind") - 1 # -1 because the design matrix will have no intercept
 
-#### OLD CODE BELOW, NOT TESTED ###########################################
-# (BENCHMARKS) ------------------------------------------------------------
-# When the data for all fires is downloaded and ready, check the RAM usage of 
-# the simulations. If we have RAM unused, we can test the function with 
-# precomputed neighbours.
+# landscape raster
+size <- 10
+n_rows <- size
+n_cols <- size
 
-
-# Compare spread with and without precomputed neighbours ------------------
-
-neighs_mat <- adjacent(r_predictors, 1:ncell(r_predictors),
-                       directions = "queen") %>% as.matrix()
-typeof(neighs_mat)
-# replace NA with cpp NA_INTEGER
-na_value <- nrow(neighs_mat) + 2
-for(i in 1:ncol(neighs_mat)) {
-  # i = 1
-  neighs_mat[, i] <- as.integer(neighs_mat[, i])
-  neighs_mat[is.na(neighs_mat[, i]), i] <- na_value
-}
-typeof(neighs_mat)
-
-# object.size(neighs_mat) / 1e6 # 327 Mb for ncol = nrow = 1600
-
-set.seed(seed)
-system.time(
-  burn_sim_cpp <- simulate_fire_cpp(landscape = values(r_predictors),
-                                    burnable = rep(1, ncell(r_predictors)),
-                                    ignition_cells = burning_cells - 1,
-                                    n_rowcol = c(nrow(r_predictors), ncol(r_predictors)),
-                                    coef = coefs,
-                                    moves = moves,
-                                    wind_column = wind_column - 1,
-                                    elev_column = elev_column - 1,
-                                    distances = distances,
-                                    angles = as.numeric(angles),
-                                    upper_limit = 1.0)
+landscape <- rast(
+  ncol = n_cols, nrow = n_rows, 
+  nlyrs = length(coefs) - 2, # intercept and slope absent
+  xmin = -1000, xmax = 1000, ymin = -1000, ymax = 1000,
+  names = names(coefs)[-c(1, length(coefs))]
 )
 
+# fill vegetation
+veg_vals <-  rmultinom(ncell(landscape), size = 1, prob = rep(0.25, 4))[1:3, ] %>% t
+values(landscape)[, 1:3] <- veg_vals
+landscape$fwi <- rnorm(ncell(landscape))            # fwi anomalies
+landscape$aspect <- cos(runif(ncell(landscape), 0, 2 * pi) - 315 * pi / 180)  # northwestyness
+landscape$wind <- runif(ncell(landscape), 0, 2 * pi)    # wind direction in radians
+landscape$elev <- runif(ncell(landscape), 0, 2200)  # m above sea level
 
-# sourceCpp("spread_functions.cpp")
-set.seed(seed)
-system.time(
-  burn_sim_cpp_notadj <- simulate_fire_cpp_notadj(
-                                    landscape = values(r_predictors),
-                                    neighbours_matrix = neighs_mat - 1,
-                                    burnable = rep(1, ncell(r_predictors)),
-                                    ignition_cells = burning_cells - 1,
-                                    n_rowcol = c(nrow(r_predictors), ncol(r_predictors)),
-                                    coef = coefs,
-                                    moves = moves,
-                                    wind_column = wind_column - 1,
-                                    elev_column = elev_column - 1,
-                                    distances = distances,
-                                    angles = as.numeric(angles),
-                                    upper_limit = 1.0)
+# make array landscape for cpp function
+landscape_arr <- array(NA, 
+                       dim = c(nrow(landscape), ncol(landscape), nlyr(landscape)))
+landscape_values <- terra::values(landscape) # get values in matrix form
+for(l in 1:nlyr(landscape)) {
+  landscape_arr[, , l] <- matrix(landscape_values[, l], 
+                                 nrow(landscape), ncol(landscape),
+                                 byrow = TRUE) # byrow because terra provides
+  # the values this way.
+}
+
+# vector of distances between a cell and its neighbours
+# (used to compute slope effect)
+distances <- rep(res(landscape)[1], 8) # sides
+distances[c(1, 3, 6, 8)] <- res(landscape)[1] * sqrt(2)
+
+# make ignition point(s)
+ig_location <- matrix(data = c(round(nrow(landscape) / 2), round(ncol(landscape) / 2)),
+                      ncol = 1)
+
+
+# ig_location is the only random now!
+ig_cell <- sample(1:ncell(landscape), 1)
+ig_location <- rowColFromCell(landscape, ig_cell) %>% t
+
+s <- round(runif(1, 1, 20000))
+
+set.seed(1)
+burn_result_r <- simulate_fire_mat_r(
+  landscape = landscape,
+  burnable = matrix(1, nrow(landscape), ncol(landscape)),
+  ignition_cells = ig_location,
+  coef = coefs,
+  wind_column = wind_column,
+  elev_column = elev_column,
+  distances = distances,
+  upper_limit = 1.0
 )
 
-# size   //  computing neighs // neighs precomputed   //   quotient
-#   600  //     5.475         //       4.549          //  1.203561
-#   1200 //     32.013        //       31.906         //  1.003354
-#
-all.equal(burn_sim_cpp, burn_sim_cpp_notadj)
-sum(burn_sim_cpp) / nrow(neighs_mat)
-
-# bug: el notadj no quema nada, por eso es tan fast.
-
-
-
-
-# Serious bechmarking -----------------------------------------------------
-
-set_landscape <- function(size) {
-
-  n_rows <- size
-  n_cols <- size
-
-  r_veg <- rast(ncol = n_cols, nrow = n_rows,
-                xmin = -1000, xmax = 1000, ymin = -1000, ymax = 1000)
-  r_elev <<- r_veg
-  r_aspect <<- r_veg
-  r_wind <<- r_veg
-  r_pp <<- r_veg
-  r_temp <<- r_veg
-
-  values(r_veg) <- rbinom(ncell(r_veg), prob = 0.5, size = 1)
-  # # to test elevation:
-  # elevs <- matrix(NA, nrow(r_veg), ncol(r_veg))
-  # elevs[1, ] <- 2000
-  # for(i in 2:nrow(elevs)) elevs[i, ] <- elevs[i-1, ] - 2000 / nrow(r_veg)
-  # as.numeric(t(elevs))#
-  values(r_elev) <<- rnorm(ncell(r_veg), 1000, 100) %>% abs
-  values(r_aspect) <<- cos(runif(ncell(r_veg), 0, 2 * pi) - 315 * pi / 180)
-  values(r_wind) <<- runif(ncell(r_veg), 0, 2 * pi)
-  values(r_pp) <<- runif(ncell(r_veg), 0, 1)
-  values(r_temp) <<- runif(ncell(r_veg), 0, 1)
-
-  r_predictors <<- c(r_veg, r_aspect, r_pp, r_temp, r_elev, r_wind)
-  names(r_predictors) <<- names(coefs)[-1]
-
-  neighs_mat <<- adjacent(r_predictors, 1:ncell(r_predictors),
-                          directions = "queen") %>% as.matrix()
-  typeof(neighs_mat)
-  # replace NA with cpp NA_INTEGER
-  na_value <<- nrow(neighs_mat) + 2
-  for(i in 1:ncol(neighs_mat)) {
-    # i = 1
-    neighs_mat[, i] <<- as.integer(neighs_mat[, i])
-    neighs_mat[is.na(neighs_mat[, i]), i] <<- na_value
-  }
-
-  # create fire raster
-  burn <<- r_veg
-  values(burn) <<- 0 #rpois(ncell(burn), lambda = 1)
-
-  # ignition point:
-  ig_location <<- cellFromRowCol(burn, nrow(burn) / 2, ncol(burn) / 2)
-  # set as burning
-  values(burn)[ig_location:(ig_location+5)] <- 1
-  # plot(r_predictors)
-
-  # initialize burning_cells cell id
-  burning_cells <<- which(values(burn) == 1) # cell number id
-}
-
-
-run_cpp_notadj <- function() {
-
-  burn_sim_cpp_notadj <- simulate_fire_cpp_notadj(
-    landscape = values(r_predictors),
-    neighbours_matrix = neighs_mat - 1,
-    burnable = rep(1, ncell(r_predictors)),
-    ignition_cells = burning_cells - 1,
-    n_rowcol = c(nrow(r_predictors), ncol(r_predictors)),
-    coef = coefs,
-    wind_column = wind_column - 1,
-    elev_column = elev_column - 1,
-    distances = distances,
-    upper_limit = 1.0)
-
-  return(burn_sim_cpp_notadj)
-}
-
-run_cpp_adj <- function() {
-  burn_sim_cpp <- simulate_fire_cpp(landscape = values(r_predictors),
-                                    burnable = rep(1, ncell(r_predictors)),
-                                    ignition_cells = burning_cells - 1,
-                                    n_rowcol = c(nrow(r_predictors), ncol(r_predictors)),
-                                    coef = coefs,
-                                    wind_column = wind_column - 1,
-                                    elev_column = elev_column - 1,
-                                    distances = distances,
-                                    upper_limit = 1.0)
-
-  return(burn_sim_cpp)
-}
-# run_cpp_adj
-coefs[1] <- -6 # initially set as 0.5, but increased to burn everything
-set_landscape(600)
-mbm <- microbenchmark(
-  not_adj = run_cpp_notadj(),
-  adj = run_cpp_adj(),
-  times = 500
+set.seed(s)
+burn_result_cpp <- simulate_fire_mat_cpp(
+  landscape = landscape_arr,
+  burnable = matrix(1, nrow(landscape), ncol(landscape)),
+  ignition_cells = ig_location - 1,
+  coef = coefs,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
 )
-# mbm
-autoplot(mbm)
 
-# con size 600, p ~ 1:
-# Unit: seconds
-# expr      min       lq     mean   median       uq      max neval
-# not_adj 3.455129 3.522688 3.724965 3.714426 3.869174 4.145065    10
-# adj     4.300220 4.453728 4.695394 4.575410 4.826309 5.339491    10
+# Error in simulate_fire_mat_cpp(landscape = landscape_arr, burnable = matrix(1,  : 
+#                                                                               Cube::tube(): indices out of bounds
 
-# Es más rápido, pero no es una locura la mejora.
+# Intentando hacer esto determinístico, saltó esto:
 
-# con size 600, p ~ 0:
-# Unit: milliseconds
-# expr      min       lq     mean   median       uq      max neval
-# not_adj 29.35553 29.80398 39.09290 31.20053 49.48754 278.7073   500
-# adj     18.57764 18.83971 26.06469 19.04619 25.33430 281.7620   500
+all.equal(burn_result_cpp, burn_result_r)
 
-# calcular los vecinos es faster cuando el fuego no quema casi nada.
+# Parece que las dos funcionan (bien?) pero no dan el mismo resultado...
+# problema con las semillas?
+# 
+# Sí, parece que no dan los mismos random numbers en cpp y R. puede ser un bug de
+# rcpp.
+
+# una forma de chequear que todo anda bien es hacer la spread deterministic
+
+# load cpp and R functions:
+source("spread_functions.R")
+sourceCpp("spread_functions.cpp")
+
+
+# FIIIIN
+# 
+# 
+# sigue testear efectos del paisaje, pero no podremos comparar exactamente el
+# resultado con el plot. siempre haremos plots y veremos si tienen sentido, 
+# sin esperar que sean exactamente iguales.
+
+
+
+# ORDENAR ESTE CODIGOOOOO
