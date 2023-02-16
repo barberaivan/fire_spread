@@ -64,7 +64,6 @@ double overlap_sp(IntegerVector fire_a, IntegerVector fire_b) {
    * to be double. If not, the result is integer, although it's defined as double.
    */
   
-  
   return overlap_index;
 }
 

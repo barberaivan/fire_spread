@@ -527,14 +527,168 @@ simulate_fire_plot <- function(landscape,
 #' @param double upper_limit: upper limit for spread probability (setting to
 #'   1 makes absurdly large fires).
 
-simulate_fire_mat_r <- function(landscape,
-                                burnable,
-                                ignition_cells,
-                                coef,
-                                wind_column = wind_column,
-                                elev_column = elev_column,
-                                distances = distances,
-                                upper_limit = 1.0) {
+simulate_fire_mat_r <- function(
+    landscape,
+    burnable,
+    ignition_cells,
+    coef,
+    wind_column = wind_column,
+    elev_column = elev_column,
+    distances = distances,
+    upper_limit = 1.0) {
+  
+  n_row <- nrow(burnable)
+  n_col <- ncol(burnable)
+  n_cell <- n_row * n_col
+  n_layers <- nlyr(landscape)
+  
+  # turn landscape into numeric array
+  landscape_arr <- array(NA, dim = c(n_row, n_col, n_layers))
+  landscape_values <- terra::values(landscape) # get values in matrix form
+  for(l in 1:n_layers) {
+    landscape_arr[, , l] <- matrix(landscape_values[, l], n_row, n_col,
+                                   byrow = TRUE) # byrow because terra provides
+    # the values this way.
+  }
+  
+  # Create burn layer, which will be exported.
+  burned_bin = matrix(0, n_row, n_col)
+  
+  # Make burning_ids matrix
+  burning_ids <- matrix(NA, 2, n_cell)
+  
+  # Initialize burning_ids and burned_bin
+  for(i in 1:ncol(ignition_cells)) {
+    burning_ids[1, i] <- ignition_cells[1, i]
+    burning_ids[2, i] <- ignition_cells[2, i]
+    
+    burned_bin[ignition_cells[1, i], ignition_cells[2, i]] <- 1
+  }
+  
+  # positions from where to read the ids of the currently burning cells
+  start <- 1
+  end <- ncol(ignition_cells)
+
+  # Fire raster for plotting
+  burn_raster <- landscape[[1]]
+  values(burn_raster) <- 0
+  
+  # get burning cells ids
+  burning_cells <- cellFromRowCol(burn_raster, 
+                                  row = burning_ids[1, start:end], 
+                                  col = burning_ids[2, start:end])
+  
+  values(burn_raster)[burning_cells] <- 1
+  # plot_colors <- data.frame(value = 0:3, color = c("green", "red", "black", "grey"))
+  # plot(burn_raster, col = plot_colors) ## it does not work
+  plot(burn_raster, col = c("green", "red"), main = "step 0")
+  
+  # spread
+  j <- 1
+  burning_size <- length(burning_cells)
+  
+  while(burning_size > 0) {
+    # Loop over all the burning cells to burn their neighbours. Use end_forward
+    # to update the last position in burning_ids within this loop, without 
+    # compromising the loop's integrity.
+    end_forward <- end
+    
+    # Loop over burning cells in the cycle
+    
+    # b is going to keep the position in burning_ids that have to be evaluated 
+    # in this burn cycle
+    
+    # spread from burning pixels
+    for(b in start:end) {
+      # Get burning_cells' data
+      data_burning <- landscape_arr[burning_ids[1, b], burning_ids[2, b], ];
+      
+      # get neighbours (adjacent computation here)
+      neighbours <- burning_ids[, b] + moves
+      
+      # Loop over neighbours of the focal burning cell 
+      for(n in 1:8) {
+        
+        # Is the cell in range?
+        out_of_range <- (
+          (neighbours[1, n] < 1) | (neighbours[1, n] > n_row) | # check rows
+          (neighbours[2, n] < 1) | (neighbours[2, n] > n_col)   # check cols
+        )
+        if(out_of_range) next # (jumps to next iteration if TRUE)
+        
+        # Is the cell burnable?
+        burnable_cell <- (burned_bin[neighbours[1, n], neighbours[2, n]] == 0) &
+                         (burnable[neighbours[1, n], neighbours[2, n]] == 1)
+        if(!burnable_cell) next
+        
+        # obtain data from the neighbour
+        data_neighbour = landscape_arr[neighbours[1, n], neighbours[2, n], ];
+        
+        # simulate fire
+        burn <- spread_onepix_r(
+          data_burning,
+          data_neighbour,
+          coef,
+          n,
+          distances,
+          elev_column,
+          wind_column,
+          upper_limit
+        )["burn"] # because it returns also the probability
+        
+        if(burn == 0) next
+        
+        # If burned,
+        # store id of recently burned cell and
+        # set 1 to burned_bin
+        # (but advance end_forward first)
+        end_forward <- end_forward + 1
+        burning_ids[1, end_forward] = neighbours[1, n]
+        burning_ids[2, end_forward] = neighbours[2, n]
+        burned_bin[neighbours[1, n], neighbours[2, n]] <- 1
+      } # end loop over neighbours of burning cell b
+      
+    } # end loop over burning cells from this cycle (j)
+    
+    # update start and end
+    start <- end + 1
+    end <- end_forward
+    burning_size <- end - start + 1
+    
+    # update: burning to burned
+    values(burn_raster)[burning_cells] <- 2
+    
+    if(burning_size > 0) {
+      # update burning_cells (this correspond to the next cycle)
+      burning_cells <- cellFromRowCol(burn_raster, 
+                                      row = burning_ids[1, start:end], 
+                                      col = burning_ids[2, start:end])
+      values(burn_raster)[burning_cells] <- 1
+    }
+    
+    # plot(burn_raster, col = plot_colors) # did not work
+    plot(burn_raster, col = c("green", "red", "black"), main = paste("step", j))
+    
+    # update cycle step
+    j <- j + 1
+  }
+  
+  return(burned_bin)
+}
+
+# ...........................................................................
+# The same function but deterministic, to test if the discrepancy between R and
+# cpp is caused by seed problems
+
+simulate_fire_mat_deterministic_r <- function(
+    landscape,
+    burnable,
+    ignition_cells,
+    coef,
+    wind_column = wind_column,
+    elev_column = elev_column,
+    distances = distances,
+    upper_limit = 1.0) {
   
   n_row <- nrow(burnable)
   n_col <- ncol(burnable)
