@@ -22,7 +22,7 @@ rtest <- rast(ncol = rowcol[2], nrow = rowcol[1],
 
 # cell to rowcol
 
-# check visually whether results make sense or not, running the following lines 
+# check visually whether results make sense or not, running the following lines
 # a few times
 
 # start
@@ -55,7 +55,7 @@ print(paste("row:", row_col_id[1,], ", col:", row_col_id[2,]))
 
 rowcol_to_cell(row_col_id, rowcol)
 rowcol_to_cell_cpp(row_col_id, rowcol)
-terra::cellFromRowCol(rtest, row_col_id[1], row_col_id[2]) 
+terra::cellFromRowCol(rtest, row_col_id[1], row_col_id[2])
 rowcol_to_cell_cpp0(row_col_id - 1, rowcol)
 
 
@@ -81,14 +81,14 @@ adjacent_vec_cpp0(cell - 1, rowcol)
 
 # create data for testing
 # model coefficients (includes intercept)
-coefs <- c(0.5, 
-           -1.5, -1.3, -0.5, 
+coefs <- c(0.5,
+           -1.5, -1.3, -0.5,
            1, 1, 1, 1, 1)
-names(coefs) <- c("intercept", 
+names(coefs) <- c("intercept",
                   "subalpine", "wet", "dry",
-                  "fwi", 
-                  "aspect", 
-                  "wind", 
+                  "fwi",
+                  "aspect",
+                  "wind",
                   "elev",
                   "slope")
 ### IMPORTANT  ---> wind and elevation parameters must be the last ones.
@@ -102,7 +102,7 @@ n_rows <- size
 n_cols <- size
 
 landscape <- rast(
-  ncol = n_cols, nrow = n_rows, 
+  ncol = n_cols, nrow = n_rows,
   nlyrs = length(coefs) - 2, # intercept and slope absent
   xmin = -1000, xmax = 1000, ymin = -1000, ymax = 1000,
   names = names(coefs)[-c(1, length(coefs))]
@@ -140,7 +140,7 @@ set.seed(s) # set seed to compare the random simulation for burning
 spread_result_r <- spread_around_r(
   data_burning = predmat[burning_cell, , drop = F], # USE DROP!!
   data_neighbours = predmat[neighs_id, , drop = F],
-  coef = coefs, 
+  coef = coefs,
   positions = pos,
   distances = distances,
   upper_limit = 1
@@ -150,7 +150,7 @@ set.seed(s)
 spread_result_cpp_burn <- spread_around_cpp(
   data_burning = predmat[burning_cell, , drop = F], # USE DROP!!
   data_neighbours = predmat[neighs_id, , drop = F],
-  coef = coefs, 
+  coef = coefs,
   positions = pos - 1, # -1 for 0-indexing
   distances = distances,
   upper_limit = 1,
@@ -161,7 +161,7 @@ spread_result_cpp_burn <- spread_around_cpp(
 spread_result_cpp_prob <- spread_around_prob_cpp(
   data_burning = predmat[burning_cell, , drop = F], # USE DROP!!
   data_neighbours = predmat[neighs_id, , drop = F],
-  coef = coefs, 
+  coef = coefs,
   positions = pos - 1, # -1 for 0-indexing
   distances = distances,
   upper_limit = 1,
@@ -190,7 +190,7 @@ set.seed(s) # set seed to compare the random simulation for burning
 spread_result_r <- spread_onepix_r(
   data_burning = predmat[burning_cell, , drop = T], # USE DROP!!
   data_neighbour = predmat[neighs_id[1], , drop = T],
-  coef = coefs, 
+  coef = coefs,
   position = pos[1],
   distances = distances,
   elev_column = elev_column,
@@ -202,7 +202,7 @@ set.seed(s)
 spread_result_cpp_burn <- spread_onepix_cpp(
   data_burning = predmat[burning_cell, , drop = F], # USE DROP!!
   data_neighbour = predmat[neighs_id[1], , drop = F],
-  coef = coefs, 
+  coef = coefs,
   position = pos[1] - 1, # -1 for 0-indexing
   distance = distances[pos[1]],
   upper_limit = 1,
@@ -213,7 +213,7 @@ spread_result_cpp_burn <- spread_onepix_cpp(
 spread_result_cpp_prob <- spread_onepix_prob_cpp(
   data_burning = predmat[burning_cell, , drop = F], # USE DROP!!
   data_neighbour = predmat[neighs_id[1], , drop = F],
-  coef = coefs, 
+  coef = coefs,
   position = pos[1] - 1, # -1 for 0-indexing
   distance = distances[pos[1]],
   upper_limit = 1,
@@ -231,14 +231,14 @@ spread_result_r["probs"] == spread_result_cpp_prob
 
 # create data for testing
 # model coefficients (includes intercept)
-coefs <- c(0.5, 
-           -1.5, -1.3, -0.5, 
+coefs <- c(0.5,
+           -1.5, -1.3, -0.5,
            1, 1, 1, 1, 1)
-names(coefs) <- c("intercept", 
+names(coefs) <- c("intercept",
                   "subalpine", "wet", "dry",
-                  "fwi", 
-                  "aspect", 
-                  "wind", 
+                  "fwi",
+                  "aspect",
+                  "wind",
                   "elev",
                   "slope")
 ### IMPORTANT  ---> wind and elevation parameters must be the last ones.
@@ -252,7 +252,7 @@ n_rows <- size
 n_cols <- size
 
 landscape <- rast(
-  ncol = n_cols, nrow = n_rows, 
+  ncol = n_cols, nrow = n_rows,
   nlyrs = length(coefs) - 2, # intercept and slope absent
   xmin = -1000, xmax = 1000, ymin = -1000, ymax = 1000,
   names = names(coefs)[-c(1, length(coefs))]
@@ -338,7 +338,7 @@ all.equal(burn_result_cpp_fool, burn_result_cpp) ## not equal
 
 # simulate landscapes where one layer varies and check that results are OK.
 
-# vegetation tests # 
+# vegetation tests #
 
 landscape_base <- landscape
 landscape_base$subalpine <- 0
@@ -429,7 +429,7 @@ lands_sub$wind <- rep(wind_dir * pi / 180, ncell(lands_sub))
 c_sub <- rep(0, length(coefs))
 names(c_sub) <- names(coefs)
 c_sub["wind"] <- 3 # increase wind effect
-c_sub["intercept"] <- 0 
+c_sub["intercept"] <- 0
 
 simulate_fire_plot(
   landscape = lands_sub,
@@ -441,7 +441,7 @@ simulate_fire_plot(
   elev_column = elev_column,
   distances = distances,
   upper_limit = 1.0
-) 
+)
 
 bb <- simulate_fire_cpp(
   landscape = values(lands_sub),
@@ -466,9 +466,9 @@ lands_sub$elev <- rep(seq(2000, 1000, length.out = nrow(lands_sub)),
 c_sub <- rep(0, length(coefs))
 names(c_sub) <- names(coefs)
 c_sub["slope"] <- 3 # increase slope effect
-c_sub["intercept"] <- -1 
+c_sub["intercept"] <- -1
 
-# elevation increases from below, so the fire should spread upwards because of 
+# elevation increases from below, so the fire should spread upwards because of
 # slope effect (elevation effect was removed.)
 simulate_fire_plot(
   landscape = lands_sub,
@@ -480,7 +480,7 @@ simulate_fire_plot(
   elev_column = elev_column,
   distances = distances,
   upper_limit = 1.0
-) 
+)
 
 bb <- simulate_fire_cpp(
   landscape = values(lands_sub),
@@ -509,7 +509,7 @@ names(c_sub) <- names(coefs)
 c_sub["elev"] <- -3 # high elevation effect (higher is less flammable)
 c_sub["intercept"] <- 1
 
-# elevation increases from below, so the fire should spread downwards because of 
+# elevation increases from below, so the fire should spread downwards because of
 # the elevation effect, which is negative. Here the slope effect was removed.
 simulate_fire_plot(
   landscape = lands_sub,
@@ -521,7 +521,7 @@ simulate_fire_plot(
   elev_column = elev_column,
   distances = distances,
   upper_limit = 1.0
-) 
+)
 
 
 bb <- simulate_fire_cpp(
@@ -549,7 +549,7 @@ lands_sub$aspect <- rep(seq(1, -1, length.out = nrow(lands_sub)),
 c_sub <- rep(0, length(coefs))
 names(c_sub) <- names(coefs)
 c_sub["aspect"] <- 2 # increase aspect effect
-c_sub["intercept"] <- -1 
+c_sub["intercept"] <- -1
 
 # Fire should spread upwards
 simulate_fire_plot(
@@ -562,7 +562,7 @@ simulate_fire_plot(
   elev_column = elev_column,
   distances = distances,
   upper_limit = 1.0
-) 
+)
 bb <- simulate_fire_cpp(
   landscape = values(lands_sub),
   burnable = rep(1, ncell(lands_sub)),
@@ -582,28 +582,28 @@ plot(landscape_base2)
 # Why do simulate_fire and simulate_fire_fool differ? ---------------------
 
 # parece que la función anda bien, pero no genera los mismos
-# números aleatorios. 
+# números aleatorios.
 
 # Es probable que pase lo siguiente: la función fool obtiene los vecinos a partir
 # de un vector de burning:
 # focal_cells = burning[burning == 1],
-# por lo que las focal_cells on obtenidas en el orden de sus ids. En cambio, 
-# con la nueva función, cada focal_cell es evaluada en el orden de quema. Esto 
+# por lo que las focal_cells on obtenidas en el orden de sus ids. En cambio,
+# con la nueva función, cada focal_cell es evaluada en el orden de quema. Esto
 # hace que las cosas no ocurran en el mismo orden, pero que todo funcione.
 
-# Chequear que los patrones físicos funcionan comparando gráficamente. 
-# Luego, testear que esto esté pasando printeando vecinos y focal cells 
+# Chequear que los patrones físicos funcionan comparando gráficamente.
+# Luego, testear que esto esté pasando printeando vecinos y focal cells
 # con ambas funciones de c++.
-# Finalmente, escribir una función de R que sea igual a la nueva de c++ para 
+# Finalmente, escribir una función de R que sea igual a la nueva de c++ para
 # poder testear contra R.
 
-# To test this I hacked the functions to terminate after just one burn cycle 
+# To test this I hacked the functions to terminate after just one burn cycle
 # (making burning_size = 0). I asked the neighbours to be printed, and provided
 # unordered ignition cells. The fool version evaluates neighbours by subsetting
-# the cell_ids[n_cell] vector as cell_ids[burning == 1]. In this way, the 
+# the cell_ids[n_cell] vector as cell_ids[burning == 1]. In this way, the
 # burning cells and the neighbours are ordered. However, the clever function
 # does not evaluate the whole burning vector but it just evaluates the burning
-# cells in the order that is provided. Running just 1 burn cycle, they are only 
+# cells in the order that is provided. Running just 1 burn cycle, they are only
 # the burning cells, so we could test this by giving unordered ignition points.
 # after this, the code was deleted.
 
@@ -620,7 +620,7 @@ rnorm(2, mean = c(0, 10))
 set.seed(1)
 rnorm(2, mean = c(10, 0))
 
-# order matters for seeds, so fool and cleve implementations of 
+# order matters for seeds, so fool and cleve implementations of
 # simulate_fire differ.
 
 
@@ -631,14 +631,14 @@ rnorm(2, mean = c(10, 0))
 
 # create data for testing
 # model coefficients (includes intercept)
-coefs <- c(0.5, 
-           -1.5, -1.3, -0.5, 
+coefs <- c(0.5,
+           -1.5, -1.3, -0.5,
            1, 1, 1, 1, 1)
-names(coefs) <- c("intercept", 
+names(coefs) <- c("intercept",
                   "subalpine", "wet", "dry",
-                  "fwi", 
-                  "aspect", 
-                  "wind", 
+                  "fwi",
+                  "aspect",
+                  "wind",
                   "elev",
                   "slope")
 ### IMPORTANT  ---> wind, elevation and slope parameters must be the last ones.
@@ -652,7 +652,7 @@ n_rows <- size
 n_cols <- size
 
 landscape <- rast(
-  ncol = n_cols, nrow = n_rows, 
+  ncol = n_cols, nrow = n_rows,
   nlyrs = length(coefs) - 2, # intercept and slope absent
   xmin = -1000, xmax = 1000, ymin = -1000, ymax = 1000,
   names = names(coefs)[-c(1, length(coefs))]
@@ -667,11 +667,11 @@ landscape$wind <- runif(ncell(landscape), 0, 2 * pi)    # wind direction in radi
 landscape$elev <- runif(ncell(landscape), 0, 2200)  # m above sea level
 
 # make array landscape for cpp function
-landscape_arr <- array(NA, 
+landscape_arr <- array(NA,
                        dim = c(nrow(landscape), ncol(landscape), nlyr(landscape)))
 landscape_values <- terra::values(landscape) # get values in matrix form
 for(l in 1:nlyr(landscape)) {
-  landscape_arr[, , l] <- matrix(landscape_values[, l], 
+  landscape_arr[, , l] <- matrix(landscape_values[, l],
                                  nrow(landscape), ncol(landscape),
                                  byrow = TRUE) # byrow because terra provides
   # the values this way.
@@ -755,7 +755,7 @@ rast_from_mat <- function(m, fill_raster) { # fill_raster is a SpatRaster from t
   for(i in 1:nrow(m)) mt[, i] <- m[i, ]
   r <- fill_raster[[1]]
   values(r) <- as.numeric(mt)
-  
+
   return(r)
 }
 
@@ -766,14 +766,14 @@ par(mfrow = c(1, 1))
 
 # create data for testing
 # model coefficients (includes intercept)
-coefs <- c(0.5, 
-           -1.5, -1.3, -0.5, 
+coefs <- c(0.5,
+           -1.5, -1.3, -0.5,
            1, 1, 1, 1, 1)
-names(coefs) <- c("intercept", 
+names(coefs) <- c("intercept",
                   "subalpine", "wet", "dry",
-                  "fwi", 
-                  "aspect", 
-                  "wind", 
+                  "fwi",
+                  "aspect",
+                  "wind",
                   "elev",
                   "slope")
 ### IMPORTANT  ---> wind and elevation parameters must be the last ones.
@@ -787,7 +787,7 @@ n_rows <- size
 n_cols <- size
 
 landscape <- rast(
-  ncol = n_cols, nrow = n_rows, 
+  ncol = n_cols, nrow = n_rows,
   nlyrs = length(coefs) - 2, # intercept and slope absent
   xmin = -1000, xmax = 1000, ymin = -1000, ymax = 1000,
   names = names(coefs)[-c(1, length(coefs))]
@@ -799,7 +799,7 @@ ig_location <- matrix(rep(round(size / 2), 2), 2, 1)
 
 # simulate landscapes where one layer varies and check that results are OK.
 
-# vegetation tests # 
+# vegetation tests #
 
 landscape_base <- landscape
 landscape_base$subalpine <- 0
@@ -854,8 +854,8 @@ par(mfrow = c(1, 1))
 lands_sub <- landscape_base
 lands_sub$wet[1:(ncell(landscape)/2)] <- 1 # the northern half is subalpine
 c_sub <- coefs
-c_sub["wet"] <- 4  
-c_sub["intercept"] <- -1 
+c_sub["wet"] <- 4
+c_sub["intercept"] <- -1
 c_sub["wind"] <- 0 # remove wind effect
 
 land_arr <- land_cube(lands_sub)
@@ -938,7 +938,7 @@ lands_sub$wind <- rep(wind_dir * pi / 180, ncell(lands_sub))
 c_sub <- rep(0, length(coefs))
 names(c_sub) <- names(coefs)
 c_sub["wind"] <- 3 # increase wind effect
-c_sub["intercept"] <- 0 
+c_sub["intercept"] <- 0
 
 land_arr <- land_cube(lands_sub)
 
@@ -979,9 +979,9 @@ lands_sub$elev <- rep(seq(2000, 1000, length.out = nrow(lands_sub)),
 c_sub <- rep(0, length(coefs))
 names(c_sub) <- names(coefs)
 c_sub["slope"] <- 5 # increase slope effect
-c_sub["intercept"] <- -1 
+c_sub["intercept"] <- -1
 
-# elevation increases from below, so the fire should spread upwards because of 
+# elevation increases from below, so the fire should spread upwards because of
 # slope effect (elevation effect was removed.)
 
 land_arr <- land_cube(lands_sub)
@@ -1024,7 +1024,7 @@ names(c_sub) <- names(coefs)
 c_sub["elev"] <- -3 # high elevation effect (higher is less flammable)
 c_sub["intercept"] <- 1
 
-# elevation increases from below, so the fire should spread downwards because of 
+# elevation increases from below, so the fire should spread downwards because of
 # the elevation effect, which is negative. Here the slope effect was removed.
 land_arr <- land_cube(lands_sub)
 
@@ -1065,7 +1065,7 @@ lands_sub$aspect <- rep(seq(1, -1, length.out = nrow(lands_sub)),
 c_sub <- rep(0, length(coefs))
 names(c_sub) <- names(coefs)
 c_sub["aspect"] <- 2 # increase aspect effect
-c_sub["intercept"] <- -1 
+c_sub["intercept"] <- -1
 
 land_arr <- land_cube(lands_sub)
 
@@ -1103,7 +1103,7 @@ lands_sub <- landscape_base
 c_sub <- rep(0, length(coefs))
 names(c_sub) <- names(coefs)
 c_sub["intercept"] <- 100 # all burns, except non burnable
-burnable_sim = matrix(rbinom(ncell(lands_sub), size = 1, prob = 0.5), 
+burnable_sim = matrix(rbinom(ncell(lands_sub), size = 1, prob = 0.5),
                       nrow(land_arr), ncol(land_arr))
 
 land_arr <- land_cube(lands_sub)

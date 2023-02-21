@@ -23,12 +23,12 @@ nrow(land) == ncell(land_raster)
 distances <- rep(res(land_raster)[1], 8) # sides
 distances[c(1, 3, 6, 8)] <- res(land_raster)[1] * sqrt(2)
 
-# coefficients 
-coefs <- c(1000, 
-           0, 0, 0, 
+# coefficients
+coefs <- c(1000,
+           0, 0, 0,
            0, 0, 0, 0, 0)
 
-ig_location <- cellFromRowCol(land_raster, 
+ig_location <- cellFromRowCol(land_raster,
                               nrow(land_raster) / 2, ncol(land_raster) / 2)
 
 ig_location_mat <- rowColFromCell(land_raster, ig_location) %>% t
@@ -36,14 +36,14 @@ ig_location_mat <- rowColFromCell(land_raster, ig_location) %>% t
 
 # landscape array for matrix representation
 land_arr <- array(
-  NA, 
+  NA,
   dim = c(nrow(land_raster), ncol(land_raster), ncol(land)),
   dimnames = list(row = NULL, col = NULL, layer = colnames(land))
 )
 for(l in 1:ncol(land)) {
-  land_arr[, , l] <- matrix(land[, l], 
-                            nrow(land_raster), 
-                            ncol(land_raster), 
+  land_arr[, , l] <- matrix(land[, l],
+                            nrow(land_raster),
+                            ncol(land_raster),
                             byrow = TRUE)
 }
 str(land_arr)
@@ -54,7 +54,7 @@ str(land_arr)
 # fool version
 start_time_fool <- Sys.time()
 fire_fool <- simulate_fire_fool_cpp(
-  landscape = land[, 1:7],      
+  landscape = land[, 1:7],
   burnable = rep(1, ncell(land_raster)),
   ignition_cells = ig_location - 1,
   n_rowcol = c(nrow(land_raster), ncol(land_raster)),
@@ -71,7 +71,7 @@ time_fool <- end_time_fool - start_time_fool
 # cool version vector
 start_time_cool <- Sys.time()
 fire_cool <- simulate_fire_cpp(
-  landscape = land[, 1:7],      
+  landscape = land[, 1:7],
   burnable = rep(1, ncell(land_raster)),
   ignition_cells = ig_location - 1,
   n_rowcol = c(nrow(land_raster), ncol(land_raster)),
@@ -87,7 +87,7 @@ time_cool <- end_time_cool - start_time_cool
 # cool version matrix
 start_time_cool_m <- Sys.time()
 fire_cool_m <- simulate_fire_mat_cpp(
-  landscape = land_arr[, , 1:7],      
+  landscape = land_arr[, , 1:7],
   burnable = matrix(1, nrow(land_raster), ncol(land_raster)),
   ignition_cells = ig_location_mat - 1,
   coef = coefs,
@@ -114,7 +114,7 @@ print(time_cool_m)
 # 0.164394
 
 # cool matrix over cool vector
-(as.numeric(time_cool_m) / as.numeric(time_cool)) 
+(as.numeric(time_cool_m) / as.numeric(time_cool))
 # 0.2513233
 
 
@@ -125,7 +125,7 @@ print(time_cool_m)
 
 mbm_all <- microbenchmark(
   fool = simulate_fire_fool_cpp(
-    landscape = land[, 1:7],      
+    landscape = land[, 1:7],
     burnable = rep(1, ncell(land_raster)),
     ignition_cells = ig_location - 1,
     n_rowcol = c(nrow(land_raster), ncol(land_raster)),
@@ -136,7 +136,7 @@ mbm_all <- microbenchmark(
     upper_limit = 1
   ),
   cool_vec = simulate_fire_cpp(
-    landscape = land[, 1:7],      
+    landscape = land[, 1:7],
     burnable = rep(1, ncell(land_raster)),
     ignition_cells = ig_location - 1,
     n_rowcol = c(nrow(land_raster), ncol(land_raster)),
@@ -147,7 +147,7 @@ mbm_all <- microbenchmark(
     upper_limit = 1
   ),
   cool_mat = simulate_fire_mat_cpp(
-    landscape = land_arr[, , 1:7],      
+    landscape = land_arr[, , 1:7],
     burnable = matrix(1, nrow(land_raster), ncol(land_raster)),
     ignition_cells = ig_location_mat - 1,
     coef = coefs,
@@ -167,7 +167,7 @@ mbm_all
 # fool version
 start_time_fool <- Sys.time()
 fire_fool <- simulate_fire_fool_cpp(
-  landscape = land[, 1:7],      
+  landscape = land[, 1:7],
   burnable = land[, "burnable"],
   ignition_cells = ig_location - 1,
   n_rowcol = c(nrow(land_raster), ncol(land_raster)),
@@ -184,7 +184,7 @@ end_time_fool <- Sys.time()
 # cool version
 start_time_cool <- Sys.time()
 fire_cool <- simulate_fire_cpp(
-  landscape = land[, 1:7],      
+  landscape = land[, 1:7],
   burnable = land[, "burnable"],
   ignition_cells = ig_location - 1,
   n_rowcol = c(nrow(land_raster), ncol(land_raster)),
@@ -200,7 +200,7 @@ end_time_cool <- Sys.time()
 # cool version matrix
 start_time_cool_m <- Sys.time()
 fire_cool_m <- simulate_fire_mat_cpp(
-  landscape = land_arr[, , 1:7],      
+  landscape = land_arr[, , 1:7],
   burnable = land_arr[, , "burnable"],
   ignition_cells = ig_location_mat - 1,
   coef = coefs,
@@ -239,7 +239,7 @@ print(time_cool_m)
 
 mbm_real <- microbenchmark(
   fool = simulate_fire_fool_cpp(
-    landscape = land[, 1:7],      
+    landscape = land[, 1:7],
     burnable = land[, "burnable"],
     ignition_cells = ig_location - 1,
     n_rowcol = c(nrow(land_raster), ncol(land_raster)),
@@ -250,7 +250,7 @@ mbm_real <- microbenchmark(
     upper_limit = 1
   ),
   cool_vec = simulate_fire_cpp(
-    landscape = land[, 1:7],      
+    landscape = land[, 1:7],
     burnable = land[, "burnable"],
     ignition_cells = ig_location - 1,
     n_rowcol = c(nrow(land_raster), ncol(land_raster)),
@@ -261,7 +261,7 @@ mbm_real <- microbenchmark(
     upper_limit = 1
   ),
   cool_mat = simulate_fire_mat_cpp(
-    landscape = land_arr[, , 1:7],      
+    landscape = land_arr[, , 1:7],
     burnable = land_arr[, , "burnable"],
     ignition_cells = ig_location_mat - 1,
     coef = coefs,
@@ -279,15 +279,15 @@ mbm_all; mbm_real
 
 # Whole landscape is burnable
 # función   tiempo
-# fool      293.49499  # 
+# fool      293.49499  #
 # cool_vec  46.10568   #
 # cool_mat  11.21112   # 11.21112 / 46.10568 = 0.2431614
 #                      # 11.21112 / 293.49499 = 0.03819868
 
 # Real burnable landscape
 # función   tiempo
-# fool      529.725118 
-# cool_vec  28.034889  # 
+# fool      529.725118
+# cool_vec  28.034889  #
 # cool_mat  6.996406   # 6.996406 / 28.034889 = 0.2495607
                        # 6.996406 / 529.725118 = 0.01320762
 
@@ -297,8 +297,8 @@ mbm_all; mbm_real
 
 #### OLD CODE BELOW, NOT TESTED ###########################################
 # (BENCHMARKS) ------------------------------------------------------------
-# When the data for all fires is downloaded and ready, check the RAM usage of 
-# the simulations. If we have RAM unused, we can test the function with 
+# When the data for all fires is downloaded and ready, check the RAM usage of
+# the simulations. If we have RAM unused, we can test the function with
 # precomputed neighbours.
 
 
@@ -367,10 +367,10 @@ sum(burn_sim_cpp) / nrow(neighs_mat)
 # Serious bechmarking -----------------------------------------------------
 
 set_landscape <- function(size) {
-  
+
   n_rows <- size
   n_cols <- size
-  
+
   r_veg <- rast(ncol = n_cols, nrow = n_rows,
                 xmin = -1000, xmax = 1000, ymin = -1000, ymax = 1000)
   r_elev <<- r_veg
@@ -378,7 +378,7 @@ set_landscape <- function(size) {
   r_wind <<- r_veg
   r_pp <<- r_veg
   r_temp <<- r_veg
-  
+
   values(r_veg) <- rbinom(ncell(r_veg), prob = 0.5, size = 1)
   # # to test elevation:
   # elevs <- matrix(NA, nrow(r_veg), ncol(r_veg))
@@ -390,10 +390,10 @@ set_landscape <- function(size) {
   values(r_wind) <<- runif(ncell(r_veg), 0, 2 * pi)
   values(r_pp) <<- runif(ncell(r_veg), 0, 1)
   values(r_temp) <<- runif(ncell(r_veg), 0, 1)
-  
+
   r_predictors <<- c(r_veg, r_aspect, r_pp, r_temp, r_elev, r_wind)
   names(r_predictors) <<- names(coefs)[-1]
-  
+
   neighs_mat <<- adjacent(r_predictors, 1:ncell(r_predictors),
                           directions = "queen") %>% as.matrix()
   typeof(neighs_mat)
@@ -404,24 +404,24 @@ set_landscape <- function(size) {
     neighs_mat[, i] <<- as.integer(neighs_mat[, i])
     neighs_mat[is.na(neighs_mat[, i]), i] <<- na_value
   }
-  
+
   # create fire raster
   burn <<- r_veg
   values(burn) <<- 0 #rpois(ncell(burn), lambda = 1)
-  
+
   # ignition point:
   ig_location <<- cellFromRowCol(burn, nrow(burn) / 2, ncol(burn) / 2)
   # set as burning
   values(burn)[ig_location:(ig_location+5)] <- 1
   # plot(r_predictors)
-  
+
   # initialize burning_cells cell id
   burning_cells <<- which(values(burn) == 1) # cell number id
 }
 
 
 run_cpp_notadj <- function() {
-  
+
   burn_sim_cpp_notadj <- simulate_fire_cpp_notadj(
     landscape = values(r_predictors),
     neighbours_matrix = neighs_mat - 1,
@@ -433,7 +433,7 @@ run_cpp_notadj <- function() {
     elev_column = elev_column - 1,
     distances = distances,
     upper_limit = 1.0)
-  
+
   return(burn_sim_cpp_notadj)
 }
 
@@ -447,7 +447,7 @@ run_cpp_adj <- function() {
                                     elev_column = elev_column - 1,
                                     distances = distances,
                                     upper_limit = 1.0)
-  
+
   return(burn_sim_cpp)
 }
 # run_cpp_adj

@@ -1,4 +1,4 @@
-# Pidiendo 90 m de res para cholila anduvo bien. 
+# Pidiendo 90 m de res para cholila anduvo bien.
 # Pidiendo 30 m, crashea.
 
 library(terra)

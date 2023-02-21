@@ -13,8 +13,8 @@
 
 # Functions to actually spread fire:
 #  spread_around_cpp
-#    (spreads fire towards the neighbours of one burning cell. 
-#    IMPORTANT: this function holds the spread model itself, so it has to be 
+#    (spreads fire towards the neighbours of one burning cell.
+#    IMPORTANT: this function holds the spread model itself, so it has to be
 #    edited if the model is changed.)
 #  simulate_fire_cpp
 #    (basically, a while loop running spread_around_cpp as long as there
@@ -25,7 +25,7 @@
 # Packages ----------------------------------------------------------------
 
 library(terra)
-library(tidyverse) # for pipe operator %>% 
+library(tidyverse) # for pipe operator %>%
 
 # Define a few constants ------------------------------------------------
 
@@ -33,7 +33,7 @@ library(tidyverse) # for pipe operator %>%
 elevation_mean <- 1163.3
 elevation_sd <- 399.5
 
-# Angles between cells to compute wind effect. As the wind direction is 
+# Angles between cells to compute wind effect. As the wind direction is
 # the direction from which the wind comes, these angles must represent where the
 # fire would come from if from the neighbours we look at the central pixel.
 angles <- c(
@@ -92,16 +92,16 @@ rowcol_to_cell <- function(rowcol, n_rowcol) {
 #' @param NumericVector n_rowcol: number or row and columns of the landscape.
 
 adjacent_r <- function(cells, n_rowcol) {
-  
+
   # get row and col from cell id
   row_col <- cell_to_rowcol(cells, n_rowcol)
-  
+
   # neighbours row_col
   neigh_rc <- array(NA, dim = c(2, 8, length(cells)))
   for(i in 1:length(cells)) {
     neigh_rc[, , i] <- row_col[, i] + moves # neighbours row-column pairs
   }
-  
+
   # Get position of values out of range
   valid_id <- matrix(0, length(cells), 8)
   for(c in 1:length(cells)) {
@@ -112,7 +112,7 @@ adjacent_r <- function(cells, n_rowcol) {
       }
     }
   }
-  
+
   # get cell id
   neigh_cell <- matrix(NA, length(cells), 8)
   for(c in 1:length(cells)) {
@@ -123,9 +123,9 @@ adjacent_r <- function(cells, n_rowcol) {
       } else {
         neigh_cell[c, i] <- NA
       }
-    } 
+    }
   }
-  
+
   return(neigh_cell)
 }
 
@@ -200,28 +200,28 @@ spread_around_r <- function(data_burning,
                             positions = 1:8,
                             distances = distances,
                             upper_limit = 1) {
-  
-  # compute wind, elevation and slope terms 
+
+  # compute wind, elevation and slope terms
   slope_term <- sin(atan((data_neighbours[, "elev"] - data_burning[1, "elev"]) / distances[positions]))
-  
+
   # standardize elevation
   data_neighbours[, "elev"] <- (data_neighbours[, "elev"] - elevation_mean) / elevation_sd
-  
+
   #modify wind term
   data_neighbours[, "wind"] <- cos(angles[positions] - data_burning[1, "wind"])
-  
+
   # bind slope term
   data_neighbours <- cbind(data_neighbours, slope_term)
-  
+
   # compute linear predictor
   linpred <- as.numeric(coef[1] + as.matrix(data_neighbours) %*% coef[2:length(coef)])
-  
-  # compute probability 
+
+  # compute probability
   probs <- plogis(linpred) * upper_limit
-  
-  
+
+
   burn <- rbinom(length(probs), size = 1, prob = probs)
-  
+
   # return both the probability and the burn to check with the cpp function
   result <- cbind(probs, burn)
   colnames(result) <- c("probs", "burn")
@@ -238,33 +238,33 @@ spread_onepix_r <- function(data_burning,
                             elev_column,
                             wind_column,
                             upper_limit = 1) {
-  
-  # compute wind, elevation and slope terms 
+
+  # compute wind, elevation and slope terms
   slope_term <- sin(atan(
     (data_neighbour[elev_column] - data_burning[elev_column]) / distances[position]
     ))
-  
+
   # standardize elevation
   data_neighbour[elev_column] <- (data_neighbour[elev_column] - elevation_mean) / elevation_sd
-  
+
   #modify wind term
   data_neighbour[wind_column] <- cos(angles[position] - data_burning[wind_column])
-  
+
   # bind slope term
   data_neighbour <- c(data_neighbour, slope_term)
 
   # compute linear predictor
   linpred <- as.numeric(coef[1] + t(as.matrix(data_neighbour)) %*% coef[2:length(coef)])
-  
-  # compute probability 
+
+  # compute probability
   probs <- plogis(linpred) * upper_limit
-  
+
   burn <- rbinom(1, size = 1, prob = probs)
-  
+
   # return both the probability and the burn to check with the cpp function
   result <- c(probs, burn)
   names(result) <- c("probs", "burn")
-  
+
   return(result)
 }
 
@@ -319,57 +319,57 @@ simulate_fire_r <- function(landscape,
                             elev_column = elev_column,
                             distances = distances,
                             upper_limit = 1.0) {
-  
+
   n_row <- n_rowcol[1]
   n_col <- n_rowcol[2]
   n_cell <- n_row * n_col
-  
+
   # // Create burn layer, which will be exported.
   burn = rep(0, n_cell)
   # // Fill the burn vector with 3 in the non-burnable pixels
   burn[burnable == 0] <- 3
   # // Set to 1 the ignition point
   burn[ignition_cells] <- 1
-  
+
   # // Get burning cells (initialized at the ignition point)
   burning_cells <- ignition_cells
-  
+
   # burn is the vector to hold the burned and burnable state;
   # predictors_matrix si the raster of predictors into matrix form;
   # n_rowcol is the number of rows and columns of the raster;
-  
+
   # spread
   j = 1
   while(length(burning_cells) > 0) {
     # print(paste("cycle ", j, sep = ""))
-    
+
     # get cell id from neighbours
     neighbours_matrix <- terra::adjacent(landscape,
                                          cells = burning_cells,
                                          directions = "queen")
     #colnames(neighbours_matrix) <- 1:8
-    
+
     # spread from burning pixels
     for(b in 1:length(burning_cells)) {
       # b = 1
       # print(paste("burning cell ", b, sep = ""))
-      
+
       #b = 1
       # get neighbours available to burn (cell ids), while getting rid of
       # non-existent neighbours
-      
+
       filter <- !is.na(neighbours_matrix[b, ]) &
         burn[neighbours_matrix[b, ]] == 0
       cols_use <- which(filter)
       neighbours <- neighbours_matrix[b, cols_use]
-      
+
       # Subset required data from landscape
       data_burning <- values(landscape)[burning_cells[b], , drop = FALSE]
       data_neighbours <- values(landscape)[neighbours, , drop = FALSE]
-      
+
       # simulate spread
       if(length(neighbours) > 0) {
-        
+
         burn[neighbours] <- spread_around_r(data_burning = data_burning,
                                             data_neighbours = data_neighbours, # with column names!
                                             coef = coef,
@@ -377,19 +377,19 @@ simulate_fire_r <- function(landscape,
                                             distances = distances,
                                             upper_limit = upper_limit)[, "burn"]
       }
-      
+
     } # end loop over burning pixels
-    
+
     # update cycle step
     j <- j + 1
-    
+
     # update: burning to burned
     burn[burning_cells] <- 2
-    
+
     # update burning_cells
     burning_cells <- which(burn == 1)
   }
-  
+
   # make burned binary layer to return
   burned <- rep(0, length(burn))
   burned[burn == 2] <- 1
@@ -408,25 +408,25 @@ simulate_fire_plot <- function(landscape,
                             elev_column = elev_column,
                             distances = distances,
                             upper_limit = 1.0) {
-  
+
   n_row <- n_rowcol[1]
   n_col <- n_rowcol[2]
   n_cell <- n_row * n_col
-  
+
   # // Create burn layer, which will be exported.
   burn = rep(0, n_cell)
   # // Fill the burn vector with 3 in the non-burnable pixels
   burn[burnable == 0] <- 3
   # // Set to 1 the ignition point
   burn[ignition_cells] <- 1
-  
+
   # // Get burning cells (initialized at the ignition point)
   burning_cells <- ignition_cells
-  
+
   # burn is the vector to hold the burned and burnable state;
   # predictors_matrix si the raster of predictors into matrix form;
   # n_rowcol is the number of rows and columns of the raster;
-  
+
   # Fire raster for plotting
   burn_raster <- landscape[[1]]
   values(burn_raster) <- 0
@@ -434,39 +434,39 @@ simulate_fire_plot <- function(landscape,
   # plot_colors <- data.frame(value = 0:3, color = c("green", "red", "black", "grey"))
   # plot(burn_raster, col = plot_colors) ## it does not work
   plot(burn_raster, col = c("green", "red"), main = "step 0")
-  
+
   # spread
   j = 1
   while(length(burning_cells) > 0) {
     # print(paste("cycle ", j, sep = ""))
-    
+
     # get cell id from neighbours
     neighbours_matrix <- terra::adjacent(landscape,
                                          cells = burning_cells,
                                          directions = "queen")
     #colnames(neighbours_matrix) <- 1:8
-    
+
     # spread from burning pixels
     for(b in 1:length(burning_cells)) {
       # b = 1
       # print(paste("burning cell ", b, sep = ""))
-      
+
       #b = 1
       # get neighbours available to burn (cell ids), while getting rid of
       # non-existent neighbours
-      
+
       filter <- !is.na(neighbours_matrix[b, ]) &
         burn[neighbours_matrix[b, ]] == 0
       cols_use <- which(filter)
       neighbours <- neighbours_matrix[b, cols_use]
-      
+
       # Subset required data from landscape
       data_burning <- values(landscape)[burning_cells[b], , drop = FALSE]
       data_neighbours <- values(landscape)[neighbours, , drop = FALSE]
-      
+
       # simulate spread
       if(length(neighbours) > 0) {
-        
+
         burn[neighbours] <- spread_around_r(data_burning = data_burning,
                                             data_neighbours = data_neighbours, # with column names!
                                             coef = coef,
@@ -474,24 +474,24 @@ simulate_fire_plot <- function(landscape,
                                             distances = distances,
                                             upper_limit = upper_limit)[, "burn"]
       }
-      
+
     } # end loop over burning pixels
-    
+
     # update: burning to burned
     burn[burning_cells] <- 2
     values(burn_raster)[burning_cells] <- 2
-    
+
     # update burning_cells
     burning_cells <- which(burn == 1)
     values(burn_raster)[burning_cells] <- 1
-    
+
     # plot(burn_raster, col = plot_colors) # not worked
     plot(burn_raster, col = c("green", "red", "black"), main = paste("step", j))
 
     # update cycle step
     j <- j + 1
   }
-  
+
   # make burned binary layer to return
   burned <- rep(0, length(burn))
   burned[burn == 2] <- 1
@@ -507,11 +507,11 @@ simulate_fire_plot <- function(landscape,
 #' @return IntegerMatrix(n_row, n_col): burned layer, a matrix with zeroes
 #'   (unburned) and ones (burned).
 
-#' @param SpatRaster[terra] landscape: raster with environmental data from the 
-#'   whole landscape. It is meant to be turned into an array 
-#'   [rows, cols, layers], but having the terra object is convenient for 
+#' @param SpatRaster[terra] landscape: raster with environmental data from the
+#'   whole landscape. It is meant to be turned into an array
+#'   [rows, cols, layers], but having the terra object is convenient for
 #'   plotting.
-#' @param IntegerMatrix ignition_cell: row-col id for the cell(s) where the fire 
+#' @param IntegerMatrix ignition_cell: row-col id for the cell(s) where the fire
 #'   begun, with a cell by column.
 #' @param IntegerMatrix burnable: matrix indicating if each pixel is burnable (1)
 #'   or not (0).
@@ -536,12 +536,12 @@ simulate_fire_mat_r <- function(
     elev_column = elev_column,
     distances = distances,
     upper_limit = 1.0) {
-  
+
   n_row <- nrow(burnable)
   n_col <- ncol(burnable)
   n_cell <- n_row * n_col
   n_layers <- nlyr(landscape)
-  
+
   # turn landscape into numeric array
   landscape_arr <- array(NA, dim = c(n_row, n_col, n_layers))
   landscape_values <- terra::values(landscape) # get values in matrix form
@@ -550,21 +550,21 @@ simulate_fire_mat_r <- function(
                                    byrow = TRUE) # byrow because terra provides
     # the values this way.
   }
-  
+
   # Create burn layer, which will be exported.
   burned_bin = matrix(0, n_row, n_col)
-  
+
   # Make burning_ids matrix
   burning_ids <- matrix(NA, 2, n_cell)
-  
+
   # Initialize burning_ids and burned_bin
   for(i in 1:ncol(ignition_cells)) {
     burning_ids[1, i] <- ignition_cells[1, i]
     burning_ids[2, i] <- ignition_cells[2, i]
-    
+
     burned_bin[ignition_cells[1, i], ignition_cells[2, i]] <- 1
   }
-  
+
   # positions from where to read the ids of the currently burning cells
   start <- 1
   end <- ncol(ignition_cells)
@@ -572,58 +572,58 @@ simulate_fire_mat_r <- function(
   # Fire raster for plotting
   burn_raster <- landscape[[1]]
   values(burn_raster) <- 0
-  
+
   # get burning cells ids
-  burning_cells <- cellFromRowCol(burn_raster, 
-                                  row = burning_ids[1, start:end], 
+  burning_cells <- cellFromRowCol(burn_raster,
+                                  row = burning_ids[1, start:end],
                                   col = burning_ids[2, start:end])
-  
+
   values(burn_raster)[burning_cells] <- 1
   # plot_colors <- data.frame(value = 0:3, color = c("green", "red", "black", "grey"))
   # plot(burn_raster, col = plot_colors) ## it does not work
   plot(burn_raster, col = c("green", "red"), main = "step 0")
-  
+
   # spread
   j <- 1
   burning_size <- length(burning_cells)
-  
+
   while(burning_size > 0) {
     # Loop over all the burning cells to burn their neighbours. Use end_forward
-    # to update the last position in burning_ids within this loop, without 
+    # to update the last position in burning_ids within this loop, without
     # compromising the loop's integrity.
     end_forward <- end
-    
+
     # Loop over burning cells in the cycle
-    
-    # b is going to keep the position in burning_ids that have to be evaluated 
+
+    # b is going to keep the position in burning_ids that have to be evaluated
     # in this burn cycle
-    
+
     # spread from burning pixels
     for(b in start:end) {
       # Get burning_cells' data
       data_burning <- landscape_arr[burning_ids[1, b], burning_ids[2, b], ];
-      
+
       # get neighbours (adjacent computation here)
       neighbours <- burning_ids[, b] + moves
-      
-      # Loop over neighbours of the focal burning cell 
+
+      # Loop over neighbours of the focal burning cell
       for(n in 1:8) {
-        
+
         # Is the cell in range?
         out_of_range <- (
           (neighbours[1, n] < 1) | (neighbours[1, n] > n_row) | # check rows
           (neighbours[2, n] < 1) | (neighbours[2, n] > n_col)   # check cols
         )
         if(out_of_range) next # (jumps to next iteration if TRUE)
-        
+
         # Is the cell burnable?
         burnable_cell <- (burned_bin[neighbours[1, n], neighbours[2, n]] == 0) &
                          (burnable[neighbours[1, n], neighbours[2, n]] == 1)
         if(!burnable_cell) next
-        
+
         # obtain data from the neighbour
         data_neighbour = landscape_arr[neighbours[1, n], neighbours[2, n], ];
-        
+
         # simulate fire
         burn <- spread_onepix_r(
           data_burning,
@@ -635,9 +635,9 @@ simulate_fire_mat_r <- function(
           wind_column,
           upper_limit
         )["burn"] # because it returns also the probability
-        
+
         if(burn == 0) next
-        
+
         # If burned,
         # store id of recently burned cell and
         # set 1 to burned_bin
@@ -647,32 +647,32 @@ simulate_fire_mat_r <- function(
         burning_ids[2, end_forward] = neighbours[2, n]
         burned_bin[neighbours[1, n], neighbours[2, n]] <- 1
       } # end loop over neighbours of burning cell b
-      
+
     } # end loop over burning cells from this cycle (j)
-    
+
     # update start and end
     start <- end + 1
     end <- end_forward
     burning_size <- end - start + 1
-    
+
     # update: burning to burned
     values(burn_raster)[burning_cells] <- 2
-    
+
     if(burning_size > 0) {
       # update burning_cells (this correspond to the next cycle)
-      burning_cells <- cellFromRowCol(burn_raster, 
-                                      row = burning_ids[1, start:end], 
+      burning_cells <- cellFromRowCol(burn_raster,
+                                      row = burning_ids[1, start:end],
                                       col = burning_ids[2, start:end])
       values(burn_raster)[burning_cells] <- 1
     }
-    
+
     # plot(burn_raster, col = plot_colors) # did not work
     plot(burn_raster, col = c("green", "red", "black"), main = paste("step", j))
-    
+
     # update cycle step
     j <- j + 1
   }
-  
+
   return(burned_bin)
 }
 
@@ -689,12 +689,12 @@ simulate_fire_mat_deterministic_r <- function(
     elev_column = elev_column,
     distances = distances,
     upper_limit = 1.0) {
-  
+
   n_row <- nrow(burnable)
   n_col <- ncol(burnable)
   n_cell <- n_row * n_col
   n_layers <- nlyr(landscape)
-  
+
   # turn landscape into numeric array
   landscape_arr <- array(NA, dim = c(n_row, n_col, n_layers))
   landscape_values <- terra::values(landscape) # get values in matrix form
@@ -703,93 +703,93 @@ simulate_fire_mat_deterministic_r <- function(
                                    byrow = TRUE) # byrow because terra provides
                                                  # the values this way.
   }
-  
+
   # Create burn layer, which will be exported.
   burned_bin = matrix(0, n_row, n_col)
-  
+
   # Make burning_ids matrix
   burning_ids <- matrix(NA, 2, n_cell)
-  
+
   # Initialize burning_ids and burned_bin
   for(i in 1:ncol(ignition_cells)) {
     burning_ids[1, i] <- ignition_cells[1, i]
     burning_ids[2, i] <- ignition_cells[2, i]
-    
+
     burned_bin[ignition_cells[1, i], ignition_cells[2, i]] <- 1
   }
-  
+
   # positions from where to read the ids of the currently burning cells
   start <- 1
   end <- ncol(ignition_cells)
-  
+
   # print("burning_ids starting \n")
   # print(burning_ids)
-  
+
   # Fire raster for plotting
   burn_raster <- landscape[[1]]
   values(burn_raster) <- 0
-  
+
   # get burning cells ids
-  burning_cells <- cellFromRowCol(burn_raster, 
-                                  row = burning_ids[1, start:end], 
+  burning_cells <- cellFromRowCol(burn_raster,
+                                  row = burning_ids[1, start:end],
                                   col = burning_ids[2, start:end])
-  
+
   values(burn_raster)[burning_cells] <- 1
   # plot_colors <- data.frame(value = 0:3, color = c("green", "red", "black", "grey"))
   # plot(burn_raster, col = plot_colors) ## it does not work
   plot(burn_raster, col = c("green", "red"), main = "step 0")
-  
+
   # spread
   j <- 1
   burning_size <- length(burning_cells)
-  
+
   while(burning_size > 0) {
     # print(paste("cycle ", j, sep = ""))
-    
+
     # Loop over all the burning cells to burn their neighbours. Use end_forward
-    # to update the last position in burning_ids within this loop, without 
+    # to update the last position in burning_ids within this loop, without
     # compromising the loop's integrity.
     end_forward <- end
-    
+
     # Loop over burning cells in the cycle
-    
-    # b is going to keep the position in burning_ids that have to be evaluated 
+
+    # b is going to keep the position in burning_ids that have to be evaluated
     # in this burn cycle
-    
+
     # spread from burning pixels
     for(b in start:end) {
       # b = 1
       # print(paste("burning cell ", b, sep = ""))
-      
+
       # Get burning_cells' data
       data_burning <- landscape_arr[burning_ids[1, b], burning_ids[2, b], ];
-      
+
       # get neighbours (adjacent computation here)
       neighbours <- burning_ids[, b] + moves
-      
+
       print("neighbours 0 index:")
       print(neighbours - 1)
-      
-      
-      # Loop over neighbours of the focal burning cell 
-      
+
+
+      # Loop over neighbours of the focal burning cell
+
       for(n in 1:8) {
-        
+
         # Is the cell in range?
         out_of_range <- (
           (neighbours[1, n] < 1) | (neighbours[1, n] > n_row) | # check rows
           (neighbours[2, n] < 1) | (neighbours[2, n] > n_col)   # check cols
-        ); 
+        );
         if(out_of_range) next # (jumps to next iteration if TRUE)
-        
+
         # Is the cell burnable?
         burnable_cell <- (burned_bin[neighbours[1, n], neighbours[2, n]] == 0) &
                          (burnable[neighbours[1, n], neighbours[2, n]] == 1)
         if(!burnable_cell) next
-        
+
         # obtain data from the neighbour
         data_neighbour = landscape_arr[neighbours[1, n], neighbours[2, n], ];
-          
+
         # simulate fire
         burn <- spread_onepix_r(
           data_burning,
@@ -801,21 +801,21 @@ simulate_fire_mat_deterministic_r <- function(
           wind_column,
           upper_limit
         )#["burn"] # because it returns also the probability
-       
+
         print("focal neighbour 0 index:")
         print(neighbours[, n] - 1)
-        
+
         print("pburn:")
         print(burn["probs"])
-        
+
         print("burn:")
         print(burn["burn"])
-        
+
         ## make deterministic!!
         if(burn["probs"] < 0.5000000000) next
         # if(burn["burn"] == 0) next
         #if(burn == 0) next
-        
+
         # If burned,
         # store id of recently burned cell and
         # set 1 to burned_bin
@@ -825,9 +825,9 @@ simulate_fire_mat_deterministic_r <- function(
         burning_ids[2, end_forward] = neighbours[2, n]
         burned_bin[neighbours[1, n], neighbours[2, n]] <- 1
       } # end loop over neighbours of burning cell b
-    
+
     } # end loop over burning cells from this cycle (j)
-    
+
     # update start and end
     start <- end + 1
     end <- end_forward
@@ -835,21 +835,21 @@ simulate_fire_mat_deterministic_r <- function(
 
     # print("burning_ids updated \n")
     # print(burning_ids)
-    
+
     # update: burning to burned
     values(burn_raster)[burning_cells] <- 2
-    
+
     if(burning_size > 0) {
       # update burning_cells (this correspond to the next cycle)
-      burning_cells <- cellFromRowCol(burn_raster, 
-                                      row = burning_ids[1, start:end], 
+      burning_cells <- cellFromRowCol(burn_raster,
+                                      row = burning_ids[1, start:end],
                                       col = burning_ids[2, start:end])
       values(burn_raster)[burning_cells] <- 1
     }
-    
+
     # plot(burn_raster, col = plot_colors) # not worked
     plot(burn_raster, col = c("green", "red", "black"), main = paste("step", j))
-    
+
     # update cycle step
     j <- j + 1
   }
