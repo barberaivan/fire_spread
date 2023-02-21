@@ -198,7 +198,7 @@ spread_around_r <- function(data_burning,
                             data_neighbours,
                             coef,
                             positions = 1:8,
-                            distances = distances,
+                            distances,
                             upper_limit = 1) {
 
   # compute wind, elevation and slope terms
@@ -315,9 +315,9 @@ simulate_fire_r <- function(landscape,
                             ignition_cells,
                             n_rowcol,
                             coef,
-                            wind_column = wind_column,
-                            elev_column = elev_column,
-                            distances = distances,
+                            wind_column,
+                            elev_column,
+                            distances,
                             upper_limit = 1.0) {
 
   n_row <- n_rowcol[1]
@@ -404,9 +404,9 @@ simulate_fire_plot <- function(landscape,
                             ignition_cells,
                             n_rowcol,
                             coef,
-                            wind_column = wind_column,
-                            elev_column = elev_column,
-                            distances = distances,
+                            wind_column,
+                            elev_column,
+                            distances,
                             upper_limit = 1.0) {
 
   n_row <- n_rowcol[1]
@@ -532,9 +532,9 @@ simulate_fire_mat_r <- function(
     burnable,
     ignition_cells,
     coef,
-    wind_column = wind_column,
-    elev_column = elev_column,
-    distances = distances,
+    wind_column,
+    elev_column,
+    distances,
     upper_limit = 1.0) {
 
   n_row <- nrow(burnable)
@@ -685,9 +685,9 @@ simulate_fire_mat_deterministic_r <- function(
     burnable,
     ignition_cells,
     coef,
-    wind_column = wind_column,
-    elev_column = elev_column,
-    distances = distances,
+    wind_column,
+    elev_column,
+    distances,
     upper_limit = 1.0) {
 
   n_row <- nrow(burnable)
@@ -856,6 +856,3 @@ simulate_fire_mat_deterministic_r <- function(
 
   return(burned_bin)
 }
-
-
-
