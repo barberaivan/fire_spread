@@ -24,15 +24,15 @@ land_raster
 distances <- rep(res(land_raster)[1], 8) # sides
 distances[c(1, 3, 6, 8)] <- res(land_raster)[1] * sqrt(2)
 
-# coefficients 
-coefs <- c(100, 
-           0, 0, 0, 
+# coefficients
+coefs <- c(100,
+           0, 0, 0,
            0, 0, 0, 0, 0)
 
-ig_location <- cellFromRowCol(land_raster, 
+ig_location <- cellFromRowCol(land_raster,
                               nrow(land_raster) / 2, ncol(land_raster) / 2)
 
-# see fire and burnable (it's important to use the burnable layer to 
+# see fire and burnable (it's important to use the burnable layer to
 # avoid huge fires). Note that cholila was mainly contained by non-burnable
 # landscape.
 # values(land_raster) <- land[, "burnable"]
@@ -44,7 +44,7 @@ ig_location <- cellFromRowCol(land_raster,
 land[ig_location, "burnable"] == 1
 
 # cholila size
-# (land[, "burned"] %>% sum()) / nrow(land) * 100 
+# (land[, "burned"] %>% sum()) / nrow(land) * 100
 # 3.047275 % del paisaje
 
 # Simulate fires ----------------------------------------------------------
@@ -70,7 +70,7 @@ nsim <- 100
 #     # con 0.3 ya se hacen gigantes, pero con 0.2 son re peques
 #     # 0.25 también hace fuegos muy muy pequeños
 #   )
-#   
+#
 #   # save by parts every ten iterations
 #   if((i %% 10) == 0) saveRDS(fire_sim, "fire_sim_028_temp.R")
 # }
@@ -88,7 +88,7 @@ hist(sizes, breaks = 30, xlab = "size in percentaje (%)")
 # con 0.28 hay muy peques y muy grandes.
 
 largest_id <- which.max(sizes)
- 
+
 # # plot the largest and cholila
 # fire_choli <- land_raster
 # values(fire_choli) <- land[, "burnable"]
@@ -110,7 +110,7 @@ largest_id <- which.max(sizes)
 disc_arr <- array(NA, dim = c(nsim, nsim, 5),
                   dimnames = list(fires = 1:nsim,
                                   fires = 1:nsim,
-                                  disc = c("ov_sp", "ov_vd", "d_m_raw", 
+                                  disc = c("ov_sp", "ov_vd", "d_m_raw",
                                            "mean_size", "dif_size")))
 
 # for(c in 1:(nsim-1)) {  ## this loop also takes long
@@ -149,20 +149,20 @@ plot(ov_importance ~ delta_m, data = discrep)
 
 
 # So, as the overlaps are bounded, when combined with delta_burned_area_by_veg,
-# they have small importance, mainly when the fires are large. 
+# they have small importance, mainly when the fires are large.
 ggplot(discrep, aes(x = d_m_raw, y = ov_sp, colour = dif_size)) +
-  geom_point(alpha = 0.5, size = 2) + 
+  geom_point(alpha = 0.5, size = 2) +
   scale_color_viridis(option = "B")
 # note that for similar overlap values, d_m_raw may be large or small.
 
-# And overlap, for me, is better than ov_vd, because many fires may have 
+# And overlap, for me, is better than ov_vd, because many fires may have
 # ov_vd = 1 with varying overlap. However, this happens mostly at small fires.
 ggplot(discrep, aes(x = ov_vd, y = ov_sp, colour = dif_size)) +
-  geom_point(alpha = 0.5, size = 2) + 
+  geom_point(alpha = 0.5, size = 2) +
   scale_color_viridis(option = "B")
 
 
-GGally::ggpairs(discrep[, c("ov_sp", "ov_vd", "d_m_raw", "dif_size")], 
+GGally::ggpairs(discrep[, c("ov_sp", "ov_vd", "d_m_raw", "dif_size")],
                 aes(alpha = 0.2))
 # ov_sp is clearly more related to size difference than ov_vd.
 # d_m_raw is also related to dif_size, but maybe not as much as ov_sp.
@@ -181,10 +181,10 @@ hist(discrep$ov_sp)
 # Average overlap ~ sample size -------------------------------------------
 
 # evaluate how the variance in the mean overlap changes as a function of the
-# number of fires used to evaluate it. 
+# number of fires used to evaluate it.
 # use seq(10, 100, by = 10) s.
 
-# For each fire and sample size, compute the overlap_mean using 10 bootstrap 
+# For each fire and sample size, compute the overlap_mean using 10 bootstrap
 # replicates. Then, compute variances by fire, ss and replicate.
 
 ss <- c(1, 5, seq(10, 100, by = 10))
@@ -205,9 +205,9 @@ for(f in 1:nsim) { # loop over fires
     ovs_cols <- disc_arr[, f, "ov_sp"]
     ovs_rows <- disc_arr[f, , "ov_sp"]
     ovs <- na.omit(c(ovs_cols, ovs_rows)) %>% as.numeric
-    
+
     if(length(ovs) != (nsim-1)) stop("check overlap size")
-    
+
     for(s in 1:length(ss)) {
       for(b in 1:nboot) {
         sample_ids <- sample(1:length(ovs), size = ss[s], replace = TRUE)
@@ -231,11 +231,11 @@ ov_var_agg <- aggregate(cbind(var, sd) ~ sample_size, ov_var, mean)
 ov_var_agg$sample_size <- as.numeric(as.character(ov_var_agg$sample_size))
 
 ggplot(ov_var_agg, aes(x = sample_size, y = var)) +
-  geom_line() + 
+  geom_line() +
   geom_point(size = 3)
 
 ggplot(ov_var_agg, aes(x = sample_size, y = sd)) +
-  geom_line() + 
+  geom_line() +
   geom_point(size = 3)
 
 # 50 o 40 fuegos serían lo ideal, pero ya entre 5 y 10 cambia mucho
@@ -243,7 +243,7 @@ ggplot(ov_var_agg, aes(x = sample_size, y = sd)) +
 
 # comments ----------------------------------------------------------------
 
-# Es muy probable que para paralelizar tengamos problemas de RAM. 
+# Es muy probable que para paralelizar tengamos problemas de RAM.
 
 # Con p = 0.28:
 # Los patrones son similares, aunque es difícil ver porque la distrib de overlap
@@ -294,7 +294,7 @@ sizes <- sizes_pix / nrow(fire_sim) * 100
 disc_choli <- matrix(NA, nsim, 5)
 colnames(disc_choli) <- c("ov_sp", "ov_vd", "d_m_raw", "size", "dif_size")
 disc_choli[, "size"] <- sizes
-choli_size <- (land[, "burned"] %>% sum()) / nrow(land) * 100 
+choli_size <- (land[, "burned"] %>% sum()) / nrow(land) * 100
 disc_choli[, "dif_size"] <- abs(choli_size - sizes)
 
 for(i in 1:nsim) {
@@ -316,7 +316,7 @@ disc_choli$delta_m <- (1 - disc_choli$ov_sp + disc_choli$d_m_raw)
 disc_choli$size_q_num <- choli_size / sizes
 
 # compute size quotient with choli in denominator
-disc_choli$size_q_den <- sizes / choli_size 
+disc_choli$size_q_den <- sizes / choli_size
 
 # add burn_p value
 disc_choli$burn_p <- rep(c(0.28, 0.25), each = 100)
@@ -339,7 +339,7 @@ par(mfrow = c(1, 1))
 
 ggplot(disc_choli, aes(x = size, y = ov_sp, colour = as.factor(burn_p),
                        size = as.factor(burn_p))) +
-  geom_point() + 
+  geom_point() +
   geom_vline(xintercept = choli_size)
 
 
@@ -348,7 +348,7 @@ aggregate(ov_sp ~ burn_p, disc_choli, mean) # en promedio es mejor la p grande
 
 
 
-# Cómo evaluar el efecto de achicar el paisaje?? 
+# Cómo evaluar el efecto de achicar el paisaje??
 # quizás agarrar los fuegos grandes (p = 0.28) y apagarle todos los pixeles,
 # imitando un paisaje más chico. luego volver a calcular los overlaps.
 
@@ -356,19 +356,19 @@ aggregate(ov_sp ~ burn_p, disc_choli, mean) # en promedio es mejor la p grande
 # tamaños y quemando todo lo quemable.
 
 # Problema hipotético: si el paisaje es chico, muchos fuegos pueden quedarse sin
-# paisaje. El tema es que esos fuegos tienen que tener tan mal overlap como 
-# los fuegos malos que sean pequeños. El problema de paisajes chicos es que 
-# pueden suavizar el mal ajuste de los parámetros que hacen que todo se vaya a 
+# paisaje. El tema es que esos fuegos tienen que tener tan mal overlap como
+# los fuegos malos que sean pequeños. El problema de paisajes chicos es que
+# pueden suavizar el mal ajuste de los parámetros que hacen que todo se vaya a
 # la mierda.
 
-# quizás estoy teniendo un problema visual. Con fuegos grandes es muy evidente 
-# el mal overlap, pero con fuegos peques no es tan notable. Pero los números no 
+# quizás estoy teniendo un problema visual. Con fuegos grandes es muy evidente
+# el mal overlap, pero con fuegos peques no es tan notable. Pero los números no
 # mienten... debería creerle más a los números.
 
 
 # landscape size thoughts -------------------------------------------------
 
-# overlap = intersection / union 
+# overlap = intersection / union
 
 # Some thoughts imagining nested fires...
 
@@ -395,12 +395,12 @@ aggregate(ov_sp ~ burn_p, disc_choli, mean) # en promedio es mejor la p grande
 
 # So, to be symmetric, the relation of the largest to observed fire should be
 # around
-# 1 / 111.11 = 0.009               
+# 1 / 111.11 = 0.009
 
 # Cholila size in pixels:       sum(land[, "burned"])   = 317956
 # Cholila landscape (burnable): sum(land[, "burnable"]) = 7122089
 # Cholila landscape (all):      nrow(land)              = 10434109
-                       
+
 # Ratio cholila / burnable = 317956 / 7122089  =     0.04464364  >> 0.009
 # Ratio cholila / all      = 317956 / 10434109 =     0.03047275  >> 0.009
 
@@ -412,7 +412,7 @@ aggregate(ov_sp ~ burn_p, disc_choli, mean) # en promedio es mejor la p grande
 
 # new_land_burnable = 10434109 * (2/3) * (7122089 / 10434109) = 4748059
 
-# Ratio cholila / burnable = 317956 / 4748059  =     0.06696547  >> 0.009 
+# Ratio cholila / burnable = 317956 / 4748059  =     0.06696547  >> 0.009
 
 # and a disjoint fire with the same size?
 # imagine
@@ -420,7 +420,7 @@ aggregate(ov_sp ~ burn_p, disc_choli, mean) # en promedio es mejor la p grande
 
 # So, a fire that burns all the landscape would be better than a disjoint one.
 # Perhaps that makes sense. I've seen that the model with p = 0.28 generates
-# small fires and fires that burn the whole landscape, so the variation is 
+# small fires and fires that burn the whole landscape, so the variation is
 # expected.
 
 # What follows? Make some benchmarks comparing large fires (p = 1 for cholila)

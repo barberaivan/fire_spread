@@ -10,7 +10,7 @@
 # That was made on GEE, and the polygons of varying size are in the file
 # landscapes_cholila.shp.
 # They will be used to crop the full landscape (p = 1), which data is in the
-# file data_cholila_landscape.R. For its raster we'll use the 
+# file data_cholila_landscape.R. For its raster we'll use the
 # data_cholila_elevation.tif, so we can make spatial masking with the polygons.
 
 library(terra)
@@ -37,7 +37,7 @@ lands_vec0 <- vect(paste(data_dir, "landscapes_cholila.shp", sep = ""))
 # reproject to posgar 2007 faja1 (flat)
 lands_vec <- project(lands_vec0, "EPSG:5343")
 
-# get raster with the largest landscape (prop = 1) 
+# get raster with the largest landscape (prop = 1)
 land_raster <- rast(paste(data_dir, "data_cholila_elevation.tif", sep = ""))
 # plot(land_raster)
 
@@ -55,11 +55,11 @@ nrow(land) == ncell(land_raster)
 for(p in 1:np) {
   print(p)
   land_raster_masked <- mask(
-    land_raster, 
-    lands_vec[p, ], 
+    land_raster,
+    lands_vec[p, ],
     updatevalue = out_value
   )
-  
+
   vals <- values(land_raster_masked)
   masked <- which(vals == out_value)
   burnable_mat[masked, p] <- 0
@@ -80,15 +80,15 @@ for(p in 1:np) {
 distances <- rep(res(land_raster)[1], 8) # sides
 distances[c(1, 3, 6, 8)] <- res(land_raster)[1] * sqrt(2)
 
-# coefficients 
-coefs <- c(1000, 
-           0, 0, 0, 
+# coefficients
+coefs <- c(1000,
+           0, 0, 0,
            0, 0, 0, 0, 0)
 
-ig_location <- cellFromRowCol(land_raster, 
+ig_location <- cellFromRowCol(land_raster,
                               nrow(land_raster) / 2, ncol(land_raster) / 2)
 
-# see fire and burnable (it's important to use the burnable layer to 
+# see fire and burnable (it's important to use the burnable layer to
 # avoid huge fires). Note that cholila was mainly contained by non-burnable
 # landscape.
 # values(land_raster) <- land[, "burnable"]
@@ -100,7 +100,7 @@ ig_location <- cellFromRowCol(land_raster,
 land[ig_location, "burnable"] == 1
 
 # cholila size
-# (land[, "burned"] %>% sum()) / nrow(land) * 100 
+# (land[, "burned"] %>% sum()) / nrow(land) * 100
 # 3.047275 % del paisaje
 
 
@@ -113,10 +113,10 @@ times <- numeric(np)
 burned_mat <- matrix(NA, nrow(land), np)
 
 for(p in 2:np) {
-  
+
   print(lands_vec$proportion[p])
   start_time <- Sys.time()
-  
+
   set.seed(124)
   burned_mat[, p] <- simulate_fire_cpp(
       landscape = land[, 1:7],      # to cpp we pass the values, not the raster
@@ -130,11 +130,11 @@ for(p in 2:np) {
       distances = distances,
       upper_limit = 1
     )
-  
+
   end_time <- Sys.time()
 
   times[p] <- as.difftime(end_time - start_time, format = "%X", units = "sec")
-  
+
 }
 
 # saveRDS(burned_mat, "/home/ivan/Insync/Fire spread modelling/data/simulations/burned_mat.R")
@@ -197,9 +197,9 @@ par(mfrow = c(1, 1))
 # with size = 0.5 it gets an overlap almost = 0.1
 
 # The jump in computation time as a function of proportion is not explained by
-# burned_size. But when proportion <= 0.5, a large area of the landscape that is 
-# burnable cannot be reached by fires starting in the middle. 
-# I will measure the computation time in landscapes where all the landscape is 
+# burned_size. But when proportion <= 0.5, a large area of the landscape that is
+# burnable cannot be reached by fires starting in the middle.
+# I will measure the computation time in landscapes where all the landscape is
 # burnable, to test whether the burnable structure affects the time-burned
 # relationship.
 
@@ -213,11 +213,11 @@ colnames(burnable_mat_all) <- lands_vec$proportion
 for(p in 1:np) {
   print(p)
   land_raster_masked <- mask(
-    land_raster, 
-    lands_vec[p, ], 
+    land_raster,
+    lands_vec[p, ],
     updatevalue = out_value
   )
-  
+
   vals <- values(land_raster_masked)
   masked <- which(vals == out_value)
   burnable_mat_all[masked, p] <- 0
@@ -232,10 +232,10 @@ burned_mat_all <- matrix(NA, nrow(land), np)
 times_all <- numeric(np)
 
 for(p in 1:np) {
-  
+
   print(lands_vec$proportion[p])
   start_time <- Sys.time()
-  
+
   set.seed(124)
   burned_mat_all[, p] <- simulate_fire_cpp(
     landscape = land[, 1:7],      # to cpp we pass the values, not the raster
@@ -249,14 +249,14 @@ for(p in 1:np) {
     distances = distances,
     upper_limit = 1
   )
-  
+
   end_time <- Sys.time()
-  
+
   print(end_time - start_time) # 3.26 min
-  
-  
+
+
   times_all[p] <- as.difftime(end_time - start_time, format = "%X", units = "sec")
-  
+
 }
 
 saveRDS(burned_mat_all, "/home/ivan/Insync/Fire spread modelling/data/simulations/burned_mat_all.R")
@@ -287,7 +287,7 @@ plot(time_q ~ burned_size, data = timesize_all,
      ylim = c(0, 1))
 par(mfrow = c(1, 1))
 
-# computation time is linear as a function of burned size, and it's much faster 
+# computation time is linear as a function of burned size, and it's much faster
 # (3 min vs 9 min) when the whole landscape is burnable.
 # An explanation might be that more burn cycles (while iterations) are needed
 # when the terrain is more complex. So, the largest overhead in the function
@@ -307,7 +307,7 @@ par(mfrow = c(1, 1))
 
 land2 <- readRDS(paste(data_dir, "data_2021_865_landscape.R", sep = ""))
 land_raster2 <- rast(paste(data_dir, "data_2021_865.tif", sep = ""))
-ig_location2 <- cellFromRowCol(land_raster2, 
+ig_location2 <- cellFromRowCol(land_raster2,
                                nrow(land_raster2) / 2, ncol(land_raster2) / 2)
 land2[ig_location2, "burnable"] # OK
 

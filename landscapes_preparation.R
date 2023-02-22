@@ -1,4 +1,4 @@
-# This script prepares the landscapes where fires are gonna be simulated. 
+# This script prepares the landscapes where fires are gonna be simulated.
 # First, I use only the landscape for Cholila, which is the largest. I will test
 # whether its size is sufficient to detect large discrepancies.
 
@@ -26,7 +26,7 @@ angles_90m <- rast(paste(data_dir, "data_cholila_elevation_284_10_90m_ang.asc", 
 # interpolate windir to 30 m
 windir <- project(angles_90m, elev, method = "cubicspline")
 
-# make vegetation data 
+# make vegetation data
 
 #                                 class code
 # 1                        Non burnable    1
@@ -39,7 +39,7 @@ windir <- project(angles_90m, elev, method = "cubicspline")
 # 8                          Plantation    8 (turned into dry forest)
 
 veg_codes <- values(land0$veg)
-unique(veg_codes) 
+unique(veg_codes)
 # replace nan with 1 (non burnable)
 veg_codes[is.nan(veg_codes)] <- 1
 
@@ -47,7 +47,7 @@ veg_mat <- matrix(0, length(veg_codes), 3) # 3 cols for wet, subalpine, and dry 
                                             # shrubland is the reference
 colnames(veg_mat) <- c("subalpine", "wet", "dry")
 
-veg_mat[veg_codes == 3, 1] <- 1 # subalpine 
+veg_mat[veg_codes == 3, 1] <- 1 # subalpine
 veg_mat[veg_codes == 3, 2] <- 1 # wet
 veg_mat[veg_codes == 4, 3] <- 1 # dry
 
@@ -60,7 +60,7 @@ colnames(land0_mat)
 # IMPORTANT: ADD BURNABLE AND BURNED LAYERS IN THE END
 
 landscape <- cbind(
-  veg_mat, 
+  veg_mat,
   fwi = rep(0, nrow(land0_mat)),
   aspect = cos(land0_mat[, "aspect"] * pi / 180), # northing
   windir = values(windir)[, 1],
@@ -94,7 +94,7 @@ land0 <- rast(paste(data_dir, "data_2021_865.tif", sep = ""))
 # interpolate windir to 30 m
 # windir <- project(angles_90m, elev, method = "cubicspline")
 
-# make vegetation data 
+# make vegetation data
 
 #                                 class code
 # 1                        Non burnable    1
@@ -107,7 +107,7 @@ land0 <- rast(paste(data_dir, "data_2021_865.tif", sep = ""))
 # 8                          Plantation    8 (turned into dry forest)
 
 veg_codes <- values(land0$veg)
-unique(veg_codes) 
+unique(veg_codes)
 # replace nan with 1 (non burnable)
 veg_codes[is.nan(veg_codes)] <- 1
 
@@ -115,7 +115,7 @@ veg_mat <- matrix(0, length(veg_codes), 3) # 3 cols for wet, subalpine, and dry 
 # shrubland is the reference
 colnames(veg_mat) <- c("subalpine", "wet", "dry")
 
-veg_mat[veg_codes == 3, 1] <- 1 # subalpine 
+veg_mat[veg_codes == 3, 1] <- 1 # subalpine
 veg_mat[veg_codes == 3, 2] <- 1 # wet
 veg_mat[veg_codes == 4, 3] <- 1 # dry
 
@@ -128,7 +128,7 @@ colnames(land0_mat)
 # IMPORTANT: ADD BURNABLE AND BURNED LAYERS IN THE END
 
 landscape <- cbind(
-  veg_mat, 
+  veg_mat,
   fwi = rep(0, nrow(land0_mat)),
   aspect = rep(0, nrow(land0_mat)), #cos(land0_mat[, "aspect"] * pi / 180), # northing
   windir = rep(0, nrow(land0_mat)), #values(windir)[, 1],

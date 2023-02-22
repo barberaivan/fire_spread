@@ -1,5 +1,5 @@
 // #include <Rcpp.h>
-#include <RcppArmadillo.h> 
+#include <RcppArmadillo.h>
 // armadillo used for the matrix represetntaion of the rasters, to use the
 // cube data type.
 
@@ -31,8 +31,8 @@ using namespace Rcpp;
  *
  * Functions to actually spread fire:
  *  spread_around_cpp
- *    (spreads fire towards the neighbours of one burning cell. 
- *    IMPORTANT: this function holds the spread model itself, so it has to be 
+ *    (spreads fire towards the neighbours of one burning cell.
+ *    IMPORTANT: this function holds the spread model itself, so it has to be
  *    edited if the model is changed.)
  *  simulate_fire_cpp
  *    (basically, a while loop running spread_around_cpp as long as there
@@ -74,7 +74,7 @@ IntegerMatrix moves = transpose(moves_t);
  * (rows and columns are numbered from the upper-left corner.)
  */
 
-// Angles between cells to compute wind effect. As the wind direction is 
+// Angles between cells to compute wind effect. As the wind direction is
 // the direction from which the wind comes, these angles must represent where the
 // fire would come from if from the neighbours we look at the central pixel.
 NumericVector angles_raw = {
@@ -93,7 +93,7 @@ IntegerVector positions = seq(0, 7);
 
 
 // -----------------------------------------------------------------------
-  
+
 //' @title cell_to_rowcol_cpp
 //' @description Translates cell id to row and column.
 //' @return IntegerMatrix(2, n_cells): matrix with row and column ids, with each
@@ -279,35 +279,35 @@ IntegerMatrix adjacent_cpp0(IntegerVector cells, IntegerVector n_rowcol) {
 
 
 // Adjacent function start 0
-// In this case, returns a vector, used to compute neighbours from only one 
+// In this case, returns a vector, used to compute neighbours from only one
 // burning cell at the time.
 
 // [[Rcpp::export]]
 IntegerVector adjacent_vec_cpp0(IntegerVector cells, IntegerVector n_rowcol) {
-  
+
   // get row and col from cell id
   IntegerMatrix row_col = cell_to_rowcol_cpp0(as<NumericVector>(cells),
                                               as<NumericVector>(n_rowcol));
   // cast as numeric because that function needs numeric inputs.
-  
+
   // Neighbours cells
   IntegerMatrix neigh_cells(cells.length(), 8); // [burning_cells, neighbours]
-  
+
   // get neighbours row_col for cell c
   IntegerMatrix neigh_rc(2, 8); // [c(row, col), neighbours]
-  
+
   // (loop over 8 neighbours)
   for(int n = 0; n < 8; n++) {
     neigh_rc(_, n) = row_col + moves(_, n); // neighbours row-column pairs
   }
-  
+
   // Write raw neighbours to result matrix (includes invalid ones)
   neigh_cells(0, _) = rowcol_to_cell_cpp0(neigh_rc,
                                           as<NumericVector>(n_rowcol));
-  
+
   // Define valid neighbours values (not out of range)
   IntegerVector valid_id(8);
-  
+
   int lower = 0; // it's the lowest allowed row or column index (c++ indexing)
   for(int n = 0; n < 8; n++) {
     if(neigh_rc(0, n) >= lower & neigh_rc(0, n) < n_rowcol(0) &  // check rows
@@ -315,17 +315,17 @@ IntegerVector adjacent_vec_cpp0(IntegerVector cells, IntegerVector n_rowcol) {
       valid_id(n) = 1; // label as 1 the valid ones
     }
   }
-  
+
   // Make NA the cell ID for invalid neighbours
   for(int n = 0; n < 8; n++) {
     if(valid_id(n) == 0)
       neigh_cells(0, n) = NA_INTEGER;
   }
-  
+
   // Turn 1-row matrix into vector
   IntegerVector result(8);
   for(int i = 0; i < 8; i++) result[i] = neigh_cells(0, i);
-  
+
   return result;
 }
 
@@ -438,7 +438,7 @@ IntegerMatrix adjacent_cpp0_2(IntegerVector burning, IntegerVector n_rowcol) {
 //'   If unchanged, it's always the same.
 //' @param double upper_limit: upper limit for spread probability (setting to
 //'   1 makes absurdly large fires).
-   
+
 //' The layers in data_ are:
 //'   subalpine forest, {0, 1} (shrubland goes in the intercept)
 //'   wet forest,       {0, 1}
@@ -465,7 +465,7 @@ IntegerMatrix adjacent_cpp0_2(IntegerVector burning, IntegerVector n_rowcol) {
  * and elevation columns, to compute angles or whatever was needed. That was
  * a bit problematic because then, in R the matrix remained modified, and
  * consecutive runs of the function were not the same.
- * This was resolved by creating new objects elev_term, slope_term and wind_term, 
+ * This was resolved by creating new objects elev_term, slope_term and wind_term,
  * which are added to the linear predictor after the loop adds the other terms.
  * This is why the wind and elevation columns in the data must be the last ones.
  */
@@ -496,10 +496,10 @@ IntegerVector spread_around_cpp(NumericVector data_burning,
 
     // wind term
     double wind_term = cos(angles(positions(i)) - data_burning(wind_column));
-    
+
     // elevation term (standardize predictor)
     double elev_term = (data_neighbours(i, elev_column) - elevation_mean) / elevation_sd;
-    
+
     // compute probability
     double linpred = coef(0); // linear predictor, initialize as intercept.
     // (the design matrix lacks the intercept column.)
@@ -510,8 +510,8 @@ IntegerVector spread_around_cpp(NumericVector data_burning,
     // (coef is lagged ahead wrt the data_neighbours because it has the intercept,
     // which is not present in the data.)
     // Add elevation, slope and wind effects
-    linpred += wind_term * coef[wind_column + 1] +  
-               elev_term * coef[elev_column + 1] + 
+    linpred += wind_term * coef[wind_column + 1] +
+               elev_term * coef[elev_column + 1] +
                slope_term * coef[elev_column + 2]; // slope coef is after the elevation one
 
     double prob = upper_limit / (1 + exp(-linpred));
@@ -547,19 +547,19 @@ NumericVector spread_around_prob_cpp(NumericVector data_burning,
   for(int i = 0; i < data_neighbours.nrow(); i++) {
 
     // compute elevation, slope and wind effects
-    
+
     // slope (from elevation)
     double slope_term = sin(atan(
       (data_neighbours(i, elev_column) - data_burning(elev_column)) /
         distances(positions(i))
     ));
-    
+
     // wind term
     double wind_term = cos(angles(positions(i)) - data_burning(wind_column));
-    
+
     // elevation term (standardize predictor)
     double elev_term = (data_neighbours(i, elev_column) - elevation_mean) / elevation_sd;
-    
+
     // compute probability
     double linpred = coef(0); // linear predictor, initialize as intercept.
     // (the design matrix lacks the intercept column.)
@@ -570,10 +570,10 @@ NumericVector spread_around_prob_cpp(NumericVector data_burning,
     // (coef is lagged ahead wrt the data_neighbours because it has the intercept,
     // which is not present in the data.)
     // Add elevation, slope and wind effects
-    linpred += wind_term * coef[wind_column + 1] +   
+    linpred += wind_term * coef[wind_column + 1] +
                elev_term * coef[elev_column + 1] +
                slope_term * coef[elev_column + 2]; // slope coef is after the elevation one
-               
+
 
     prob(i) = upper_limit / (1 + exp(-linpred));
   }
@@ -587,7 +587,7 @@ NumericVector spread_around_prob_cpp(NumericVector data_burning,
 //' @description Spreads fire from a burning cell to just one neighbour. It's
 //'   just a not-vectorized version of spread_around_cpp.
 //' @return int burn {0, 1} indicating whether the pixel burned or not.
-//' 
+//'
 //' @param arma::vec data_burning: environmental data from burning cell.
 //' @param arma::vec data_neighbours: environmental data from target neighbours.
 //' @param NumericVector coef: parameters in logistic regression to compute the
@@ -622,20 +622,20 @@ int spread_onepix_cpp(arma::vec data_burning,
                       int elev_column,
                       double distance,
                       double upper_limit = 1.0) {
-  
+
   // compute elevation, slope and wind effects
-  
+
   // slope (from elevation)
   double slope_term = sin(atan(
     (data_neighbour(elev_column) - data_burning(elev_column)) / distance
     ));
-    
+
   // wind term
   double wind_term = cos(angles(position) - data_burning(wind_column));
-    
+
   // elevation term (standardize predictor)
   double elev_term = (data_neighbour(elev_column) - elevation_mean) / elevation_sd;
-    
+
   // compute probability
   double linpred = coef(0); // linear predictor, initialize as intercept.
   // (the design matrix lacks the intercept column.)
@@ -643,19 +643,19 @@ int spread_onepix_cpp(arma::vec data_burning,
   for(int k = 0; k < (data_neighbour.size() - 2); k++) {
     linpred += coef(k+1) * data_neighbour(k);
   }
-  
+
   // (coef is lagged ahead wrt the data_neighbours because it has the intercept,
   // which is not present in the data.)
   // Add elevation, slope and wind effects
-  linpred += wind_term * coef[wind_column + 1] +  
-    elev_term * coef[elev_column + 1] + 
+  linpred += wind_term * coef[wind_column + 1] +
+    elev_term * coef[elev_column + 1] +
     slope_term * coef[elev_column + 2]; // slope coef is after the elevation one
-  
+
   double prob = upper_limit / (1 + exp(-linpred));
-    
+
   // Simulate the spread
   int burn = R::rbinom(1.0, prob);
-  
+
   return burn;
 
 }
@@ -672,20 +672,20 @@ double spread_onepix_prob_cpp(arma::vec data_burning,
                            int elev_column,
                            double distance,
                            double upper_limit = 1.0) {
-  
+
   // compute elevation, slope and wind effects
-  
+
   // slope (from elevation)
   double slope_term = sin(atan(
     (data_neighbour(elev_column) - data_burning(elev_column)) / distance
   ));
-  
+
   // wind term
   double wind_term = cos(angles(position) - data_burning(wind_column));
-  
+
   // elevation term (standardize predictor)
   double elev_term = (data_neighbour(elev_column) - elevation_mean) / elevation_sd;
-  
+
   // compute probability
   double linpred = coef(0); // linear predictor, initialize as intercept.
   // (the design matrix lacks the intercept column.)
@@ -693,21 +693,21 @@ double spread_onepix_prob_cpp(arma::vec data_burning,
   for(int k = 0; k < (data_neighbour.size() - 2); k++) {
     linpred += coef(k+1) * data_neighbour(k);
   }
-  
+
   // (coef is lagged ahead wrt the data_neighbours because it has the intercept,
   // which is not present in the data.)
   // Add elevation, slope and wind effects
-  linpred += wind_term * coef[wind_column + 1] +  
-    elev_term * coef[elev_column + 1] + 
+  linpred += wind_term * coef[wind_column + 1] +
+    elev_term * coef[elev_column + 1] +
     slope_term * coef[elev_column + 2]; // slope coef is after the elevation one
-  
+
   double prob = upper_limit / (1 + exp(-linpred));
-  
+
   // Simulate the spread
   int burn = R::rbinom(1.0, prob);
-  
+
   return prob;
-  
+
 }
 
 // -----------------------------------------------------------------------
@@ -762,53 +762,53 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
                                 int elev_column,
                                 NumericVector distances,
                                 double upper_limit) {
-  
+
   int n_row = n_rowcol[0];
   int n_col = n_rowcol[1];
   int n_cell = n_row * n_col;
-  
+
   // burned_ids will be filled with the cell ids of the burning pixels. start
-  // and end integers will define the positions limits corresponding to the 
+  // and end integers will define the positions limits corresponding to the
   // burning cells in every burn cycle.
   IntegerVector burned_ids = rep(NA_INTEGER, n_cell); // filled with integer_NA
-  
+
   int start = 0;
   // end is the last non-empty position in the burned_ids vector.
-  int end = ignition_cells.length() - 1; 
+  int end = ignition_cells.length() - 1;
   // Example:
   // burned_ids = {231, 455, 342, 243, NA, NA, NA, NA};
   //               start          end.
   // if only one cell is burning, start = end.
-  
+
   // initialize burned_ids and burning_size with ignition_cells
   burned_ids[seq(start, end)] = ignition_cells;
   int burning_size = ignition_cells.length(); // == end + 1 - start
-  
+
   // The burned_bin vector will indicate whether each pixel is burned or burning
   // (1) or not (0). It's necessary to have this now because it will be used
   // to define burnable neighbours.
   IntegerVector burned_bin = rep(0, n_cell);
   // initialize with ignition_cells
   burned_bin[ignition_cells] = 1;
-  
+
   // spread
   while(burning_size > 0) {
     // Loop over all the burning cells to burn their neighbours. Use end_forward
-    // to update the last position in burned_ids within this loop, without 
+    // to update the last position in burned_ids within this loop, without
     // compromising the loop's integrity.
     int end_forward = end;
-    
-    // b is going to keep the position in burned_ids that have to be evaluated 
+
+    // b is going to keep the position in burned_ids that have to be evaluated
     // in this burn cycle
     for(int b = start; b <= end; b++) {
-      
+
       // get id of focal burning cell
       IntegerVector focal_id(1);
       focal_id[0] = burned_ids[b];
 
       // Get burning_cells' data
       NumericVector data_burning = landscape(focal_id[0], _);
-      
+
       // get neighbours
       IntegerVector neigh_b = adjacent_vec_cpp0(focal_id, n_rowcol);
 
@@ -817,9 +817,9 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
 
       // Make NA if the pixel is invalid
       for(int n = 0; n < 8; n++) {
-        
+
         bool out_of_range = (neigh_b[n] == -2147483648); // it's NA for integers in cpp
-        
+
         // First check if cell is out of range, because if true, we cant evaluate
         // this cell in the {burning, burnable, burned} vectors
         if(out_of_range) {
@@ -830,7 +830,7 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
         else {
           bool burnable_cell = (burned_bin[neigh_b[n]] == 0) &
                                (burnable[neigh_b[n]] == 1);
-          
+
           if(!burnable_cell) {
             neigh_b[n] = NA_INTEGER;
             positions[n] = NA_INTEGER;
@@ -841,20 +841,20 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
       // remove NAs
       neigh_b = na_omit(neigh_b);
       positions = na_omit(positions);
-      
+
       // If there are burnable neighbours, spread around
       if(neigh_b.length() > 0) {
-        
+
         // Get its valid neighbours' data
         NumericMatrix data_neighbours(neigh_b.length(), landscape.ncol());
-        
+
         for(int n = 0; n < neigh_b.length(); n++) {
           data_neighbours(n, _) = landscape(neigh_b[n], _);
         }
-        
-        // Spread fire towards neighbours 
+
+        // Spread fire towards neighbours
         IntegerVector burn_result(neigh_b.length());
-        
+
         burn_result = spread_around_cpp(
           data_burning,
           data_neighbours,
@@ -865,7 +865,7 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
           distances,
           upper_limit
         );
-        
+
         // store ids of recently burned cells and
         // set ones in burned_bin
         // (but advance end_forward first)
@@ -876,24 +876,24 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
             burned_bin[neigh_b[i]] = 1;
           }
         }
-        
+
       } // end if for length(neighbours > 0)
-    
+
     } // end loop over burning cells
-    
+
     // update start and end
     start = end + 1;
     end = end_forward;
     burning_size = end - start + 1;
   } // end while
-  
+
   return burned_bin;
 }
 
 // -----------------------------------------------------------------------
 
 // function to simulate a fire spread given the landscape,
-// model coefficients and ignition points. 
+// model coefficients and ignition points.
 // In this case, use a matrix representation of the landscape to avoid shifting
 // from cell to rowcol and backwards when the neighbours are computed.
 
@@ -912,10 +912,10 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
 //'   as terra does.
 
 //' @param List landscape: environmental data from the whole landscape.
-//'   See description in spread_around. Every element in the list is a layer in 
+//'   See description in spread_around. Every element in the list is a layer in
 //'   matrix representation, with rows and columns displayed as they are in the
 //'   landscape (not transposed!).
-//' @param IntegerMatrix ignition_cells(2, burning_cells): row and column id for 
+//' @param IntegerMatrix ignition_cells(2, burning_cells): row and column id for
 //'   the cell(s) where the fire begun. First row has the row_id, second row has
 //'   the col_id.
 //' @param IntegeMatrix burnable: matrix indicating if each pixel is burnable (1)
@@ -949,89 +949,89 @@ IntegerVector simulate_fire_cpp(NumericMatrix landscape,
 IntegerVector simulate_fire_mat_cpp(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
-    IntegerMatrix burnable,      
+    IntegerMatrix burnable,
     NumericVector coef,
     int wind_layer,
     int elev_layer,
     NumericVector distances,
     double upper_limit) {
-  
+
   int n_row = burnable.nrow();
   int n_col = burnable.ncol();
   int n_cell = n_row * n_col;
 
-  // burned_ids [row-col, cell] will be filled with the row_col ids (rows) of the 
-  // burning pixels (columns). start and end integers will define the positions 
+  // burned_ids [row-col, cell] will be filled with the row_col ids (rows) of the
+  // burning pixels (columns). start and end integers will define the positions
   // limits corresponding to the burning cells in every burn cycle.
   IntegerMatrix burned_ids(2, n_cell); // check it's filled with 0 // -2147483648 is NA_INTEGER
-  
+
   int start = 0;
   // end is the last non-empty position in the burned_ids matrix.
-  int end = ignition_cells.ncol() - 1; 
+  int end = ignition_cells.ncol() - 1;
   // Example:
   // burned_ids = {231, 455, 342, 243, NA, NA, NA, NA};
   //               start          end.
   // if only one cell is burning, start = end.
-  
+
   // initialize burned_ids and burning_size with ignition_cells
   for(int c = 0; c <= end; c++) {
     for(int r = 0; r < 2; r++) {
       burned_ids(r, c) = ignition_cells(r, c);
-    } 
+    }
   }
 
   // initialize burning_size
   int burning_size = ignition_cells.ncol(); // == end + 1 - start
-  
+
   // The burned_bin matrix will indicate whether each pixel is burned or burning
   // (1) or not (0). It's necessary to have this now because it will be used
   // to define burnable neighbours.
   IntegerMatrix burned_bin(n_row, n_col);
-  
+
   // initialize with ignition_cells
   for(int i = 0; i <= end; i++) {
     burned_bin(ignition_cells(0, i), ignition_cells(1, i)) = 1;
   }
-  
+
   while(burning_size > 0) {
     // Loop over all the burning cells to burn their neighbours. Use end_forward
-    // to update the last position in burned_ids within this loop, without 
+    // to update the last position in burned_ids within this loop, without
     // compromising the loop's integrity.
     int end_forward = end;
-    
+
     // Loop over burning cells in the cycle
-    
-    // b is going to keep the position in burned_ids that have to be evaluated 
+
+    // b is going to keep the position in burned_ids that have to be evaluated
     // in this burn cycle
     for(int b = start; b <= end; b++) {
-      
+
       // Get burning_cells' data
       arma::vec data_burning = landscape.tube(burned_ids(0, b), burned_ids(1, b));
-      
+
       // get neighbours (adjacent computation here)
       IntegerMatrix neighbours(2, 8);
       for(int i = 0; i < 8; i++) neighbours(_, i) = burned_ids(_, b) + moves(_, i);
-      
-      // Loop over neighbours of the focal burning cell 
-      
+
+      // Loop over neighbours of the focal burning cell
+
       for(int n = 0; n < 8; n++) {
-        
+
         // Is the cell in range?
         bool out_of_range = (
           (neighbours(0, n) < 0) | (neighbours(0, n) >= n_row) | // check rows
           (neighbours(1, n) < 0) | (neighbours(1, n) >= n_col)   // check cols
-        ); 
+        );
         if(out_of_range) continue;
-        
+
         // Is the cell burnable?
         bool burnable_cell = (burned_bin(neighbours(0, n), neighbours(1, n)) == 0) &
                              (burnable(neighbours(0, n), neighbours(1, n)) == 1);
-        
+
         if(!burnable_cell) continue;
-        
+
         // obtain data from the neighbour
         arma::vec data_neighbour = landscape.tube(neighbours(0, n), neighbours(1, n));
-        
+
         // simulate fire
         int burn;
         burn = spread_onepix_cpp(
@@ -1044,9 +1044,9 @@ IntegerVector simulate_fire_mat_cpp(
           distances(n),
           upper_limit
         );
-        
+
         if(burn == 0) continue;
-        
+
         // If burned,
         // store id of recently burned cell and
         // set 1 in burned_bin
@@ -1055,18 +1055,18 @@ IntegerVector simulate_fire_mat_cpp(
         burned_ids(0, end_forward) = neighbours(0, n);
         burned_ids(1, end_forward) = neighbours(1, n);
         burned_bin(neighbours(0, n), neighbours(1, n)) = 1;
-        
+
       } // end loop over neighbours of burning cell b
-      
+
     } // end loop over burning cells from this cycle
-    
+
     // update start and end
     start = end + 1;
     end = end_forward;
     burning_size = end - start + 1;
 
   } // end while
-  
+
   return burned_bin;
 }
 
@@ -1081,42 +1081,42 @@ IntegerVector simulate_fire_mat_cpp(
 IntegerVector simulate_fire_mat_deterministic_cpp(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
-    IntegerMatrix burnable,      
+    IntegerMatrix burnable,
     NumericVector coef,
     int wind_layer,
     int elev_layer,
     NumericVector distances,
     double upper_limit) {
-  
+
   int n_row = burnable.nrow();
   int n_col = burnable.ncol();
   int n_cell = n_row * n_col;
   // Rcout << "n_cell:\n" << n_cell << "\n";
-  
-  // burned_ids [row-col, cell] will be filled with the row_col ids (rows) of the 
-  // burning pixels (columns). start and end integers will define the positions 
+
+  // burned_ids [row-col, cell] will be filled with the row_col ids (rows) of the
+  // burning pixels (columns). start and end integers will define the positions
   // limits corresponding to the burning cells in every burn cycle.
   IntegerMatrix burned_ids(2, n_cell); // check it's filled with 0 // -2147483648 is NA_INTEGER
-  
+
   int start = 0;
   // end is the last non-empty position in the burned_ids matrix.
-  int end = ignition_cells.ncol() - 1; 
+  int end = ignition_cells.ncol() - 1;
   // Example:
   // burned_ids = {231, 455, 342, 243, NA, NA, NA, NA};
   //               start          end.
   // if only one cell is burning, start = end.
-  
+
   // initialize burned_ids and burning_size with ignition_cells
   for(int c = 0; c <= end; c++) {
     for(int r = 0; r < 2; r++) {
       burned_ids(r, c) = ignition_cells(r, c);
-    } 
+    }
   }
   // Rcout << "burned_ids:\n" << burned_ids << "\n";
-  
+
   // initialize burning_size
   int burning_size = ignition_cells.ncol(); // == end + 1 - start
-  
+
   // The burned_bin matrix will indicate whether each pixel is burned or burning
   // (1) or not (0). It's necessary to have this now because it will be used
   // to define burnable neighbours.
@@ -1126,41 +1126,41 @@ IntegerVector simulate_fire_mat_deterministic_cpp(
   for(int i = 0; i <= end; i++) {
     burned_bin(ignition_cells(0, i), ignition_cells(1, i)) = 1;
   }
-  
+
   while(burning_size > 0) {
     // Loop over all the burning cells to burn their neighbours. Use end_forward
-    // to update the last position in burned_ids within this loop, without 
+    // to update the last position in burned_ids within this loop, without
     // compromising the loop's integrity.
     int end_forward = end;
-    
+
     // Loop over burning cells in the cycle
-    
-    // b is going to keep the position in burned_ids that have to be evaluated 
+
+    // b is going to keep the position in burned_ids that have to be evaluated
     // in this burn cycle
     for(int b = start; b <= end; b++) {
-  
+
       // Get burning_cells' data
       arma::vec data_burning = landscape.tube(burned_ids(0, b), burned_ids(1, b));
 
       // get neighbours (adjacent computation here)
       IntegerMatrix neighbours(2, 8);
       for(int i = 0; i < 8; i++) neighbours(_, i) = burned_ids(_, b) + moves(_, i);
-      
-      // Loop over neighbours of the focal burning cell 
-      
+
+      // Loop over neighbours of the focal burning cell
+
       for(int n = 0; n < 8; n++) {
-        
+
         // Is the cell in range?
         bool out_of_range = (
           (neighbours(0, n) < 0) | (neighbours(0, n) >= n_row) | // check rows
           (neighbours(1, n) < 0) | (neighbours(1, n) >= n_col)   // check cols
-        ); 
+        );
         if(out_of_range) continue;
-        
+
         // Is the cell burnable?
         bool burnable_cell = (burned_bin(neighbours(0, n), neighbours(1, n)) == 0) &
                              (burnable(neighbours(0, n), neighbours(1, n)) == 1);
-        
+
         if(!burnable_cell) continue;
 
         // obtain data from the neighbour
@@ -1178,18 +1178,18 @@ IntegerVector simulate_fire_mat_deterministic_cpp(
           distances(n),
           upper_limit
         );
-        
+
         IntegerVector fc = neighbours(_, n);
         // Rcout << "focal neighbour:\n" << fc << "\n";
         // Rcout << "pburn:\n" << pburn << "\n";
-        
+
         burn = R::rbinom(1, pburn);
-        
+
         // Rcout << "burn:\n" << burn << "\n";
-        
+
         //// make deterministic here
         if(pburn < 0.5000000000) continue;
-        
+
         // If burned,
         // store id of recently burned cell and
         // set 1 in burned_bin
@@ -1198,30 +1198,30 @@ IntegerVector simulate_fire_mat_deterministic_cpp(
         burned_ids(0, end_forward) = neighbours(0, n);
         burned_ids(1, end_forward) = neighbours(1, n);
         burned_bin(neighbours(0, n), neighbours(1, n)) = 1;
-        
+
         // Rcout << "burned_bin:\n" << burned_bin << "\n";
-        
-        
+
+
       } // end loop over neighbours of burning cell b
-    
+
     } // end loop over burning cells from this cycle
-    
+
     // Rcout << "burned_ids:\n" << burned_ids << "\n";
-    
-    
+
+
     // update start and end
     start = end + 1;
     end = end_forward;
     burning_size = end - start + 1;
     // Rcout << "burning_size:\n" << burning_size << "\n";
-    
+
   } // end while
-  
+
   return burned_bin;
 }
 
- 
- 
+
+
 
 // --------------------------------------------------------------------------
 
