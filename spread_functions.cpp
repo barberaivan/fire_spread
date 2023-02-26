@@ -1,5 +1,5 @@
 #include <RcppArmadillo.h>
-// armadillo used for the matrix represetntaion of the rasters, to use the
+// armadillo used for the matrix representation of the rasters, to use the
 // cube data type.
 
 // Useful armadillo links
@@ -32,7 +32,7 @@ IntegerMatrix moves = transpose(moves_t);
  * of a 8-pixels neighbourhood, it's a matrix with 2 rows (row and column
  * values) and 8 columns. Its values are {-1, 0, 1}, so that when adding up
  * the row-col ids of a cell and a column of moves, we get the row-col of a
- * neighbour. They are oredered like this:
+ * neighbour. They are ordered like this:
  * 1 2 3
  * 4   5
  * 6 7 8
@@ -70,7 +70,7 @@ NumericVector angles = angles_raw * M_PI / 180; // in radians!
 //'   than the columns of data_ because it includes the intercept.
 //' @param IntegerVector position: relative position of the neighbour in
 //'   relation to the burning cell. The eight neighbours are labelled from 0 to
-//'   7 beggining from the upper-left one (by row):
+//'   7 beginning from the upper-left one (by row):
 //'   0 1 2
 //'   3   4
 //'   5 6 7.
@@ -211,7 +211,7 @@ double spread_onepix_prob_cpp(arma::vec data_burning,
 //' @param IntegerMatrix ignition_cells(2, burning_cells): row and column id for
 //'   the cell(s) where the fire begun. First row has the row_id, second row has
 //'   the col_id.
-//' @param IntegeMatrix burnable: matrix indicating if each pixel is burnable (1)
+//' @param IntegerMatrix burnable: matrix indicating if each pixel is burnable (1)
 //'   or not (0).
 //' @param NumericVector coef: parameters in logistic regression to compute the
 //'   spread probability as a function of covariates.
