@@ -1,9 +1,10 @@
 # This script prepares the landscapes where fires are gonna be simulated.
-# First, I use only the landscape for Cholila, which is the largest. I will test
-# whether its size is sufficient to detect large discrepancies.
 
+# The first step is to extract the elevation layer from all images to use as
+# input in windninja. These files will be saved as wind_*fire id*.tif.
 
-#´ The layers in data_ are:
+# Once the wind layers are created, the landscape arrays will be made as follows:
+
 #´   subalpine forest, {0, 1} (shrubland goes in the intercept)
 #´   wet forest,       {0, 1}
 #´   dry forest,       {0, 1}
@@ -12,10 +13,243 @@
 #´   wind direction    [-1, 1] (windward vs leeward)
 #´   elevation,        (standardized in the code)
 
-
 library(terra)
 library(tidyverse)
-data_dir <- "/home/ivan/Insync/Fire spread modelling/data/focal fires data/"
+
+gee_dir <- "/home/ivan/Insync/Fire spread modelling/data/focal fires data/raw data from GEE/"
+windninja_dir <- "/home/ivan/Insync/Fire spread modelling/data/focal fires data/wind ninja files/"
+
+
+# Export elevations -------------------------------------------------------
+
+fnames <- list.files(gee_dir)
+# 4th is the 1999_28
+
+for(i in 1:length(fnames)) {
+  print(i)
+  r <- rast(paste(gee_dir, fnames[i], sep = ""))[["elev"]]
+  id_raw <- strsplit(fnames[i], "_")[[1]][-(1:3)]
+  id <- paste(id_raw, collapse = "_")
+  writeRaster(r, paste(windninja_dir, id, sep = ""))
+}
+
+# Inputs for wind ninja (avg over study area):
+
+# // Wind direction avg:
+# // 284.0693132595486°
+# 
+# // Wind speed avg:
+# // 4.78628962675556 m/s
+
+# Note that the .tif files will be the elevation layer in elevation_dir,
+# while the others will be outputs from windninja.
+
+# Details for wind ninja: 
+# mesh resolution = 90 m, 
+# result scale = 30 m,
+# speed unit = m/s,
+# speed input = 4.79 m/s,
+# windir input = 284°
+# mass conservation solver
+
+
+# Import raw data, wind and fwi -------------------------------------------
+
+# import fire shapes to get year (for fwi matching)
+f <- vect("/home/ivan/Insync/Burned area mapping/patagonian_fires/patagonian_fires/patagonian_fires.shp")
+
+# fwi image
+fwi <- rast("/home/ivan/Insync/Fire spread modelling/data/fwi_anomalies.tif")
+crs(fwi) <- "EPSG:4326"
+
+fnames <- list.files(gee_dir)
+fire_ids <- fnames
+n_fires <- length(fire_ids)
+
+# list with raw images
+raw_imgs <- vector(mode = "list", length = length(fnames))
+for(i in 1:length(fnames)) {
+  raw_imgs[[i]] <- rast(paste(gee_dir, fnames[i], sep = ""))
+  id_raw <- strsplit(fnames[i], c("_|[.]"))[[1]] 
+  remove <- c(1:3, length(id_raw))
+  id <- paste(id_raw[-remove], collapse = c("_"))
+  fire_ids[i] <- id
+}
+names(raw_imgs) <- fire_ids
+
+# list with wind direction rasters
+
+wind_files_raw <- list.files(windninja_dir)
+wind_files <- wind_files_raw[grep("_ang.asc", wind_files_raw)]
+wind_ids <- sapply(wind_files, function(x) {
+  id_raw <- strsplit(x, c("_|[.]"))[[1]] 
+  remove <- length(id_raw) : (length(id_raw) - 4)
+  id <- paste(id_raw[-remove], collapse = c("_"))
+  return(id)
+}) %>% unname()
+# all.equal(wind_ids, fire_ids)
+
+wind_imgs <- raw_imgs
+for(i in 1:length(wind_imgs)) {
+  fii <- paste(windninja_dir, wind_files[i], sep = "")
+  wind_imgs[[i]] <- rast(fii)
+}
+
+
+# Make landscapes ---------------------------------------------------------
+
+
+# vegetation data
+#                                 class code
+# 1                        Non burnable    1
+# 2                    Subalpine forest    2
+# 3                          Wet forest    3
+# 4                          Dry forest    4
+# 5                           Shrubland    5
+# 6                           Grassland    6 (turn into shrubland)
+# 7 Anthropogenic prairie and shrubland    7 (turned into shrubland)
+# 8                          Plantation    8 (turned into dry forest)
+
+
+
+
+# get years
+fyears <- sapply(fire_ids, function(x) {
+  f$year[f$fire_id == x]
+}) 
+
+# list with landscapes
+lands <- vector(mode = "list", length = n_fires)
+names(lands) <- fire_ids
+
+which(fire_ids == "2021_865")
+
+for(i in 1:n_fires) {
+  print(i)
+  # i = 45
+  
+  # get raw image values
+  v <- values(raw_imgs[[i]])
+  
+  # vegetation
+  veg_codes <- v[, "veg"]
+  # replace nan with 1 (non burnable)
+  veg_codes[is.nan(veg_codes)] <- 1
+  
+  # make veg matrix
+  veg_mat <- matrix(0, length(veg_codes), 3) # 3 cols for wet, subalpine, and dry forests
+  # shrubland is the reference
+  colnames(veg_mat) <- c("subalpine", "wet", "dry")
+  
+  veg_mat[veg_codes == 2, 1] <- 1 # subalpine
+  veg_mat[veg_codes == 3, 2] <- 1 # wet
+  veg_mat[veg_codes == 4, 3] <- 1 # dry
+  
+  # get fwi
+  fwi_local <- project(fwi[[as.character(fyears[i])]], 
+                       raw_imgs[[i]],
+                       method = "cubicspline")
+  names(fwi_local) <- "fwi"
+  
+  # project wind direction to match extent
+  wind_local <- project(wind_imgs[[i]],
+                        raw_imgs[[i]],
+                        method = "cubicspline")
+  names(wind_local) <- "wind"
+  
+  # get landscape in matrix form
+  land_long <- cbind(
+    veg_mat,
+    fwi = values(fwi_local),
+    aspect = cos(v[, "aspect"] * pi / 180), # northing
+    windir = values(wind_local) * pi / 180, # in radians
+    elev = v[, "elev"],
+    burnable = v[, "burnable"],
+    burned = v[, "burned"]
+  )
+  # Order matters. Wind and elevation must be the last data-layers,
+  # with burnable and burned in the end.
+  
+  # get landscape in array form
+  land_arr <- array(
+    NA, 
+    dim = c(nrow(raw_imgs[[i]]), 
+            ncol(raw_imgs[[i]]),
+            ncol(land_long)),
+    dimnames = list(rows = NULL, cols = NULL, 
+                    layers = colnames(land_long))
+  )
+  
+  for(j in 1:ncol(land_long)) {
+    land_arr[, , j] <- matrix(land_long[, j], 
+                              nrow = nrow(land_arr),
+                              ncol = ncol(land_arr),
+                              byrow = TRUE)
+  } # terra gives values of raster by row
+  
+  lands[[i]] <- land_arr
+}
+
+
+object.size(lands) / 1e6 # 2569.5 Mb
+saveRDS(lands, "lands_temp.rds")
+# lapply(lands, class) # OK?
+
+
+# Ignition points ---------------------------------------------------------
+
+points_raw <- vect("/home/ivan/Insync/Fire spread modelling/data/ignition_points_checked.shp")
+points <- project(points_raw, raw_imgs[[1]])
+points$Name
+
+for(i in 1:n_fires) {
+  # i = 1
+  
+  # subset ignition points
+  p_local <- points[points$Name == fire_ids[i]]
+  
+  # get coordinates and row_col
+  cc <- crds(p_local)
+  ig_rowcol <- rbind(rowFromY(raw_imgs[[i]], cc[, "y"]),
+                     colFromX(raw_imgs[[i]], cc[, "x"]))
+  row.names(ig_rowcol) <- c("row", "col")
+  
+  if(anyNA(ig_rowcol)) {
+    stop(paste("Ignition point out of range,", "fire_id", fire_ids[i]))
+  }
+  
+  attr(lands[[i]], "ig_rowcol") <- ig_rowcol
+}
+
+attr(lands[[45]], "ig_rowcol")
+
+# Check all ignition points fall in burned and burnable cells
+ccc <- numeric(n_fires)
+for(i in 1:n_fires) {
+  # i = 26
+  ig <- attr(lands[[i]], "ig_rowcol")
+  
+  point_checks <- sapply(1:ncol(ig), function(c) {
+    lands[[i]][ig[1, c], ig[2, c], c("burned", "burnable")]
+  }) %>% colSums %>% unique()
+  
+  ccc[i] <- point_checks
+  
+  ss <- sum(lands[[i]][ig[1, ], ig[2, ], c("burned", "burnable")])
+  if(point_checks != 2) {
+    stop(paste("Ignition point problems,", "fire_id:", fire_ids[i], "i:", i))
+  }
+}
+ccc # perfect.
+
+
+# Save landscapes list ----------------------------------------------------
+
+saveRDS(lands, "/home/ivan/Insync/Fire spread modelling/data/landscapes_ig-known_non-steppe.rds")
+
+
+# OLD CODE BELOW, --------------------------------------------------------
+# used to make cholila and another fires before.
 
 # Cholila fire ------------------------------------------------------------
 
@@ -26,17 +260,7 @@ angles_90m <- rast(paste(data_dir, "data_cholila_elevation_284_10_90m_ang.asc", 
 # interpolate windir to 30 m
 windir <- project(angles_90m, elev, method = "cubicspline")
 
-# make vegetation data
 
-#                                 class code
-# 1                        Non burnable    1
-# 2                    Subalpine forest    2
-# 3                          Wet forest    3
-# 4                          Dry forest    4
-# 5                           Shrubland    5
-# 6                           Grassland    6 (turn into shrubland)
-# 7 Anthropogenic prairie and shrubland    7 (turned into shrubland)
-# 8                          Plantation    8 (turned into dry forest)
 
 veg_codes <- values(land0$veg)
 unique(veg_codes)
@@ -144,7 +368,9 @@ object.size(landscape) / 1e6
 sum(landscape[, "burnable"]) / nrow(landscape) # 84 % quemable
 
 # save 2021_865 landscape
+saveRDS(landscape, paste(data_dir, "data_2021_865_landscape.rds", sep = ""))
 
-saveRDS(landscape, paste(data_dir, "data_2021_865_landscape.R", sep = ""))
+
+## IMPORTANT!!! Save as rds all R files
 
 
