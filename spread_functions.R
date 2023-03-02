@@ -210,8 +210,6 @@ simulate_fire_mat_r <- function(
                                   col = burning_ids[2, start:end])
 
   values(burn_raster)[burning_cells] <- 1
-  # plot_colors <- data.frame(value = 0:3, color = c("green", "red", "black", "grey"))
-  # plot(burn_raster, col = plot_colors) ## it does not work
   plot(burn_raster, col = c("green", "red"), main = "step 0")
 
   # spread
@@ -353,10 +351,6 @@ simulate_fire_mat_deterministic_r <- function(
   start <- 1
   end <- ncol(ignition_cells)
 
-  # print("burning_ids starting \n")
-  # print(burning_ids)
-
-  # Fire raster for plotting
   burn_raster <- landscape[[1]]
   values(burn_raster) <- 0
 
@@ -366,8 +360,6 @@ simulate_fire_mat_deterministic_r <- function(
                                   col = burning_ids[2, start:end])
 
   values(burn_raster)[burning_cells] <- 1
-  # plot_colors <- data.frame(value = 0:3, color = c("green", "red", "black", "grey"))
-  # plot(burn_raster, col = plot_colors) ## it does not work
   plot(burn_raster, col = c("green", "red"), main = "step 0")
 
   # spread
@@ -375,8 +367,6 @@ simulate_fire_mat_deterministic_r <- function(
   burning_size <- length(burning_cells)
 
   while(burning_size > 0) {
-    # print(paste("cycle ", j, sep = ""))
-
     # Loop over all the burning cells to burn their neighbours. Use end_forward
     # to update the last position in burning_ids within this loop, without
     # compromising the loop's integrity.
@@ -389,8 +379,6 @@ simulate_fire_mat_deterministic_r <- function(
 
     # spread from burning pixels
     for(b in start:end) {
-      # b = 1
-      # print(paste("burning cell ", b, sep = ""))
 
       # Get burning_cells' data
       data_burning <- landscape_arr[burning_ids[1, b], burning_ids[2, b], ];
@@ -431,8 +419,6 @@ simulate_fire_mat_deterministic_r <- function(
 
         ## make deterministic!!
         if(burn["probs"] < 0.5000000000) next
-        # if(burn["burn"] == 0) next
-        #if(burn == 0) next
 
         # If burned,
         # store id of recently burned cell and
@@ -451,9 +437,6 @@ simulate_fire_mat_deterministic_r <- function(
     end <- end_forward
     burning_size <- end - start + 1
 
-    # print("burning_ids updated \n")
-    # print(burning_ids)
-
     # update: burning to burned
     values(burn_raster)[burning_cells] <- 2
 
@@ -465,7 +448,6 @@ simulate_fire_mat_deterministic_r <- function(
       values(burn_raster)[burning_cells] <- 1
     }
 
-    # plot(burn_raster, col = plot_colors) # not worked
     plot(burn_raster, col = c("green", "red", "black"), main = paste("step", j))
 
     # update cycle step

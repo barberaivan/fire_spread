@@ -384,7 +384,6 @@ IntegerVector simulate_fire_mat_deterministic_cpp(
   int n_row = burnable.nrow();
   int n_col = burnable.ncol();
   int n_cell = n_row * n_col;
-  // Rcout << "n_cell:\n" << n_cell << "\n";
 
   // burned_ids [row-col, cell] will be filled with the row_col ids (rows) of the
   // burning pixels (columns). start and end integers will define the positions
@@ -405,7 +404,6 @@ IntegerVector simulate_fire_mat_deterministic_cpp(
       burned_ids(r, c) = ignition_cells(r, c);
     }
   }
-  // Rcout << "burned_ids:\n" << burned_ids << "\n";
 
   // initialize burning_size
   int burning_size = ignition_cells.ncol(); // == end + 1 - start
@@ -473,12 +471,8 @@ IntegerVector simulate_fire_mat_deterministic_cpp(
         );
 
         IntegerVector fc = neighbours(_, n);
-        // Rcout << "focal neighbour:\n" << fc << "\n";
-        // Rcout << "pburn:\n" << pburn << "\n";
 
         burn = R::rbinom(1, pburn);
-
-        // Rcout << "burn:\n" << burn << "\n";
 
         //// make deterministic here
         if(pburn < 0.5000000000) continue;
@@ -491,22 +485,14 @@ IntegerVector simulate_fire_mat_deterministic_cpp(
         burned_ids(0, end_forward) = neighbours(0, n);
         burned_ids(1, end_forward) = neighbours(1, n);
         burned_bin(neighbours(0, n), neighbours(1, n)) = 1;
-
-        // Rcout << "burned_bin:\n" << burned_bin << "\n";
-
-
       } // end loop over neighbours of burning cell b
 
     } // end loop over burning cells from this cycle
-
-    // Rcout << "burned_ids:\n" << burned_ids << "\n";
-
 
     // update start and end
     start = end + 1;
     end = end_forward;
     burning_size = end - start + 1;
-    // Rcout << "burning_size:\n" << burning_size << "\n";
 
   } // end while
 
