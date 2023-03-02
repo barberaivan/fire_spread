@@ -398,10 +398,6 @@ simulate_fire_mat_deterministic_r <- function(
       # get neighbours (adjacent computation here)
       neighbours <- burning_ids[, b] + moves
 
-      print("neighbours 0 index:")
-      print(neighbours - 1)
-
-
       # Loop over neighbours of the focal burning cell
 
       for(n in 1:8) {
@@ -432,15 +428,6 @@ simulate_fire_mat_deterministic_r <- function(
           wind_column,
           upper_limit
         )#["burn"] # because it returns also the probability
-
-        print("focal neighbour 0 index:")
-        print(neighbours[, n] - 1)
-
-        print("pburn:")
-        print(burn["probs"])
-
-        print("burn:")
-        print(burn["burn"])
 
         ## make deterministic!!
         if(burn["probs"] < 0.5000000000) next
