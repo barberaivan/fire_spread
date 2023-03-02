@@ -166,7 +166,8 @@ simulate_fire_mat_r <- function(
     wind_column,
     elev_column,
     distances,
-    upper_limit = 1.0) {
+    upper_limit = 1.0,
+    plot_animation = FALSE) {
 
   n_row <- nrow(burnable)
   n_col <- ncol(burnable)
@@ -210,7 +211,9 @@ simulate_fire_mat_r <- function(
                                   col = burning_ids[2, start:end])
 
   values(burn_raster)[burning_cells] <- 1
-  plot(burn_raster, col = c("green", "red"), main = "step 0")
+  if (plot_animation) {
+    plot(burn_raster, col = c("green", "red"), main = "step 0")
+  }
 
   # spread
   j <- 1
@@ -295,8 +298,9 @@ simulate_fire_mat_r <- function(
       values(burn_raster)[burning_cells] <- 1
     }
 
-    # plot(burn_raster, col = plot_colors) # did not work
-    plot(burn_raster, col = c("green", "red", "black"), main = paste("step", j))
+    if (plot_animation) {
+      plot(burn_raster, col = c("green", "red", "black"), main = paste("step", j))
+    }
 
     # update cycle step
     j <- j + 1
@@ -317,7 +321,8 @@ simulate_fire_mat_deterministic_r <- function(
     wind_column,
     elev_column,
     distances,
-    upper_limit = 1.0) {
+    upper_limit = 1.0,
+    plot_animation = FALSE) {
 
   n_row <- nrow(burnable)
   n_col <- ncol(burnable)
@@ -360,7 +365,9 @@ simulate_fire_mat_deterministic_r <- function(
                                   col = burning_ids[2, start:end])
 
   values(burn_raster)[burning_cells] <- 1
-  plot(burn_raster, col = c("green", "red"), main = "step 0")
+  if (plot_animation) {
+    plot(burn_raster, col = c("green", "red"), main = "step 0")
+  }
 
   # spread
   j <- 1
@@ -448,7 +455,9 @@ simulate_fire_mat_deterministic_r <- function(
       values(burn_raster)[burning_cells] <- 1
     }
 
-    plot(burn_raster, col = c("green", "red", "black"), main = paste("step", j))
+    if (plot_animation) {
+      plot(burn_raster, col = c("green", "red", "black"), main = paste("step", j))
+    }
 
     # update cycle step
     j <- j + 1
