@@ -512,3 +512,153 @@ IntegerVector simulate_fire_mat_deterministic_cpp(
 
   return burned_bin;
 }
+
+// -------------------------------------------------------------------------
+
+// same as simulate_fire_mat, but returning many things to compute dicrepancy
+// metrics:
+// burned_bin layer,
+// burned_ids,
+// size by veg_type
+
+// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::export]]
+List simulate_fire_disc(
+    arma::cube landscape,
+    IntegerMatrix ignition_cells,
+    IntegerMatrix burnable,
+    NumericVector coef,
+    int wind_layer,
+    int elev_layer,
+    NumericVector distances,
+    double upper_limit) {
+
+  int n_row = burnable.nrow();
+  int n_col = burnable.ncol();
+  int n_cell = n_row * n_col;
+
+  // burned_ids [row-col, cell] will be filled with the row_col ids (rows) of the
+  // burning pixels (columns). start and end integers will define the positions
+  // limits corresponding to the burning cells in every burn cycle.
+  IntegerMatrix burned_ids(2, n_cell); // check it's filled with 0 // -2147483648 is NA_INTEGER
+
+  int start = 0;
+  // end is the last non-empty position in the burned_ids matrix.
+  int end = ignition_cells.ncol() - 1;
+  // Example:
+  // burned_ids = {231, 455, 342, 243, NA, NA, NA, NA};
+  //               start          end.
+  // if only one cell is burning, start = end.
+
+  // initialize burned_ids and burning_size with ignition_cells
+  for(int c = 0; c <= end; c++) {
+    for(int r = 0; r < 2; r++) {
+      burned_ids(r, c) = ignition_cells(r, c);
+    }
+  }
+
+  // initialize burning_size
+  int burning_size = ignition_cells.ncol(); // == end + 1 - start
+
+  // The burned_bin matrix will indicate whether each pixel is burned or burning
+  // (1) or not (0). It's necessary to have this now because it will be used
+  // to define burnable neighbours.
+  IntegerMatrix burned_bin(n_row, n_col);
+
+  // initialize with ignition_cells
+  for(int i = 0; i <= end; i++) {
+    burned_bin(ignition_cells(0, i), ignition_cells(1, i)) = 1;
+  }
+
+  while(burning_size > 0) {
+    // Loop over all the burning cells to burn their neighbours. Use end_forward
+    // to update the last position in burned_ids within this loop, without
+    // compromising the loop's integrity.
+    int end_forward = end;
+
+    // Loop over burning cells in the cycle
+
+    // b is going to keep the position in burned_ids that have to be evaluated
+    // in this burn cycle
+    for(int b = start; b <= end; b++) {
+
+      // Get burning_cells' data
+      arma::vec data_burning = landscape.tube(burned_ids(0, b), burned_ids(1, b));
+
+      // get neighbours (adjacent computation here)
+      IntegerMatrix neighbours(2, 8);
+      for(int i = 0; i < 8; i++) neighbours(_, i) = burned_ids(_, b) + moves(_, i);
+
+      // Loop over neighbours of the focal burning cell
+
+      for(int n = 0; n < 8; n++) {
+
+        // Is the cell in range?
+        bool out_of_range = (
+          (neighbours(0, n) < 0) | (neighbours(0, n) >= n_row) | // check rows
+            (neighbours(1, n) < 0) | (neighbours(1, n) >= n_col)   // check cols
+        );
+        if(out_of_range) continue;
+
+        // Is the cell burnable?
+        bool burnable_cell = (burned_bin(neighbours(0, n), neighbours(1, n)) == 0) &
+          (burnable(neighbours(0, n), neighbours(1, n)) == 1);
+
+        if(!burnable_cell) continue;
+
+        // obtain data from the neighbour
+        arma::vec data_neighbour = landscape.tube(neighbours(0, n), neighbours(1, n));
+
+        // simulate fire
+        int burn;
+        burn = spread_onepix_cpp(
+          data_burning,
+          data_neighbour,
+          coef,
+          n,           // pixel position identifier (for wind and slope effects)
+          wind_layer,
+          elev_layer,
+          distances(n),
+          upper_limit
+        );
+
+        if(burn == 0) continue;
+
+        // If burned,
+        // store id of recently burned cell and
+        // set 1 in burned_bin
+        // (but advance end_forward first)
+        end_forward += 1;
+        burned_ids(0, end_forward) = neighbours(0, n);
+        burned_ids(1, end_forward) = neighbours(1, n);
+        burned_bin(neighbours(0, n), neighbours(1, n)) = 1;
+
+      } // end loop over neighbours of burning cell b
+
+    } // end loop over burning cells from this cycle
+
+    // update start and end
+    start = end + 1;
+    end = end_forward;
+    burning_size = end - start + 1;
+
+  } // end while
+
+  // Compute burned area by vegetation type
+  NumericVector counts_veg(4);
+  for(int i = 0; i <= end; i++) {
+    for(int v = 1; v < 4; v++) { // starts from 1 because 0 is for shrubland
+      counts_veg(v) += landscape(burned_ids(0, i), burned_ids(1, i), v-1);
+    }
+    // landscape must have the vegetation layers in the first veg_types - 1 layers
+  }
+  // fill shrubland
+  counts_veg(0) = (end + 1) - sum(counts_veg[seq(1, 3)]);
+
+  // List to return:
+  List L = List::create(Named("burned_layer") = burned_bin,
+                        Named("burned_ids") = burned_ids(_, seq(0, end)),
+                        Named("counts_veg") = counts_veg);
+
+  return L;
+}

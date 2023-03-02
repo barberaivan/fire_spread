@@ -23,7 +23,68 @@ using namespace Rcpp;
  *  integer, but I do it so for computations involving these integers to return
  *  double results. Apparently, double x = int1 + int1 is not double, but int.
  *
- *
+ *  -------------------------------------------------------------
+ *  
+ *  
+ *  
+ *                      IMPORTANT  !!!!!!!
+ *  
+ *  MASSIVE IMPROVEMENTS TO DO, BASED ON THE MATRIX REPRESENTATION OF THE 
+ *  LANDSCAPE. ALL FUNCTIONS BELOW EVALUATE THE WHOLE LANDSCAPE 
+ *  UNNECESSARILY.
+ *  
+ *  Improvements:
+ *  
+ *  With the matrix representation of the landscape, where burning (burned)
+ *  cell ids are stored in a matrix, using the burning_ids we can avoid evaluating
+ *  the whole landscape. 
+ *  
+ *  To count burned by veg_type we could do this:
+ *  
+ *  // end is the last position filled in burning_ids, so its the number of 
+ *  // pixels burned. Check if it should be summed one or not to be the size.
+ *  
+ *  NumericVector counts(veg_types);
+ *  
+ *  for(int i = 0; i <= end; i++) {
+ *    for(int v = 1; v < veg_types; v++) { // starts from 1 because 0 is for shrubland
+ *      counts(v) += landscape(burning_ids(0, i), burning_ids(1, i), v-1);
+ *    }
+ *    // landscape must have the vegetation layers in the first veg_types - 1 layers 
+ *  }
+ *  
+ *  // fill shrubland
+ *  counts(v) = (end + 1) - sum(counts(seq(1, veg_types - 1)));
+ *  
+ *  NumericVector props(veg_types);
+ *  for(int i = 0; i < veg_types; i++) props(i) = counts(i) / end;
+ *  
+ *  
+ *  
+ *  // ---------------------------
+ *  
+ *  Another improvement for overlap_sp would be to evaluate the intersection
+ *  using only the smaller fire. So, only in those ids the intersection counter
+ *  would operate:
+ *  
+ *  int smaller_size = min({end, reference_fire_size});
+ *  
+ *  double both = 0.0;
+ *  
+ *  for(int i = 0; i < smaller_size; i++) {
+ *    both(i) += burned_layer_larger(burning_ids_smaller(0, i), 
+ *                                   burning_ids_smaller(1, i));
+ *  }
+ *  
+ *  // this subsetting could probably be improved using armadillo arrays
+ *  
+ *  overlap = both / (size_a + size_b - both)
+ *  
+ *  
+ *  //// COMPARE WHETHER A COUNTER LIKE THOSE ABOVE IS SLOWER THAN 
+ *  sum(vector[subset]), to test if using armadillo structures is better.
+ *  
+ *  
  */
 
 
@@ -42,12 +103,12 @@ using namespace Rcpp;
 
 // [[Rcpp::export]]
 double overlap_sp(IntegerVector fire_a, IntegerVector fire_b) {
-
+  
   // check both fires have burned pixels
   if((sum(fire_a) == 0) | (sum(fire_b) == 0)) {
     stop("At least one fire has zero burned pixels.");
   }
-
+  
   // number of cells burned in both fires
   double common = 0;                                 // changed int by double
   for(int i = 0; i < fire_a.length(); i++) {
@@ -56,14 +117,14 @@ double overlap_sp(IntegerVector fire_a, IntegerVector fire_b) {
   // burned cells in layers a and b
   double burned_a = sum(fire_a);                                 // changed int by double
   double burned_b = sum(fire_b);                                 // changed int by double
-
+  
   // spatial overlap index
   double overlap_index = common / (burned_a + burned_b - common);
   /*
    * IMPORTANT: in this computation all variables must be double for the result
    * to be double. If not, the result is integer, although it's defined as double.
    */
-
+  
   return overlap_index;
 }
 
@@ -123,19 +184,19 @@ double delta_m(IntegerVector fire_a,
                NumericMatrix landscape,
                int veg_types = 4,
                bool squared = 0) {
-
+  
   // check both fires have burned pixels
   if((sum(fire_a) == 0) | (sum(fire_b) == 0)) {
     stop("At least one fire has zero burned pixels.");
   }
-
+  
   // overall discrepancy (1 - overlap_spatial)
   double overall = 1 - overlap_sp(fire_a, fire_b);
-
+  
   // get burned area by fire and vegetation type
   IntegerVector burned_veg_a(veg_types);
   IntegerVector burned_veg_b(veg_types);
-
+  
   // Fill all vegetation types except the background one (shrubland)
   for(int v = 0; v < (veg_types - 1); v++) {
     int count_a = 0;
@@ -150,18 +211,18 @@ double delta_m(IntegerVector fire_a,
   // Fill background veg_type (shrubland)
   burned_veg_a[veg_types - 1] = sum(fire_a) - sum(burned_veg_a[seq(1, 3)]);
   burned_veg_b[veg_types - 1] = sum(fire_b) - sum(burned_veg_b[seq(1, 3)]);
-
+  
   // compute delta.
   double delta = overall;
   for(int v = 0; v < veg_types; v++) {
-
+    
     double mean_area = (burned_veg_a[v] + burned_veg_b[v]) / 2.0;
-
+    
     if(mean_area > 0) {
       delta += abs(burned_veg_a[v] - burned_veg_b[v]) / mean_area;
     }
   }
-
+  
   return delta;
   if(squared == 1) return(pow(delta, 2.0));
 }
@@ -183,20 +244,20 @@ delta_m(fire_1, fire_2, landscape)
 
 // [[Rcpp::export]]
 double delta_m_raw(IntegerVector fire_a,
-                  IntegerVector fire_b,
-                  NumericMatrix landscape,
-                  int veg_types = 4,
-                  bool squared = 0) {
-
+                   IntegerVector fire_b,
+                   NumericMatrix landscape,
+                   int veg_types = 4,
+                   bool squared = 0) {
+  
   // check both fires have burned pixels
   if((sum(fire_a) == 0) | (sum(fire_b) == 0)) {
     stop("At least one fire has zero burned pixels.");
   }
-
+  
   // get burned area by fire and vegetation type
   IntegerVector burned_veg_a(veg_types);
   IntegerVector burned_veg_b(veg_types);
-
+  
   // Fill all vegetation types except the background one (shrubland)
   for(int v = 0; v < (veg_types - 1); v++) {
     int count_a = 0;
@@ -211,18 +272,18 @@ double delta_m_raw(IntegerVector fire_a,
   // Fill background veg_type (shrubland)
   burned_veg_a[veg_types - 1] = sum(fire_a) - sum(burned_veg_a[seq(1, 3)]);
   burned_veg_b[veg_types - 1] = sum(fire_b) - sum(burned_veg_b[seq(1, 3)]);
-
+  
   // compute delta.
   double delta = 0;
   for(int v = 0; v < veg_types; v++) {
-
+    
     double mean_area = (burned_veg_a[v] + burned_veg_b[v]) / 2.0;
-
+    
     if(mean_area > 0) {
       delta += abs(burned_veg_a[v] - burned_veg_b[v]) / mean_area;
     }
   }
-
+  
   return delta;
   if(squared == 1) return(pow(delta, 2.0));
 }
@@ -249,16 +310,16 @@ double overlap_vd(IntegerVector fire_a,
                   IntegerVector fire_b,
                   NumericMatrix landscape,
                   int veg_types = 4) {
-
+  
   // check both fires have burned pixels
   if((sum(fire_a) == 0) | (sum(fire_b) == 0)) {
     stop("At least one fire has zero burned pixels.");
   }
-
+  
   // get burned area by fire and vegetation type
   NumericVector burned_veg_a(veg_types);  // changed integer to numeric class
   NumericVector burned_veg_b(veg_types);
-
+  
   // Fill all vegetation types except the background one (shrubland)
   for(int v = 0; v < (veg_types - 1); v++) {
     double count_a = 0;
@@ -273,27 +334,27 @@ double overlap_vd(IntegerVector fire_a,
   // Fill background veg_type (shrubland)
   burned_veg_a[veg_types - 1] = sum(fire_a) - sum(burned_veg_a[seq(1, 3)]);
   burned_veg_b[veg_types - 1] = sum(fire_b) - sum(burned_veg_b[seq(1, 3)]);
-
+  
   // Get vegetation distribution by fire (normalized burned areas)
   NumericVector burned_dist_a(veg_types);
   NumericVector burned_dist_b(veg_types);
-
+  
   for(int v = 0; v < veg_types; v++) {
     burned_dist_a[v] = burned_veg_a[v] / sum(burned_veg_a);
     burned_dist_b[v] = burned_veg_b[v] / sum(burned_veg_b);
   }
-
+  
   // compute vegetation distribution overlap
   double overlap_index = 0;
   for(int v = 0; v < veg_types; v++) {
     overlap_index += std::min(burned_dist_a[v], burned_dist_b[v]);
   }
-
+  
   /*
    * IMPORTANT: in this computation all variables must be double for the result
    * to be double. If not, the result is integer, although it's defined as double.
    */
-
+  
   return overlap_index;
 }
 
@@ -353,19 +414,19 @@ double overlap_spvd(IntegerVector fire_a,
                     int veg_types = 4,
                     bool discrepancy = 0,
                     bool squared = 0) {
-
+  
   NumericVector weights = {0.8, 0.2};
-
+  
   // get overlaps
   double overlap_spatial = overlap_sp(fire_a, fire_b);
   double overlap_vegdist = overlap_vd(fire_a, fire_b, landscape, veg_types);
-
+  
   // get overall overlap (weighted average)
   double overlap_index = weights[0] / sum(weights) * overlap_spatial +
-                         weights[1] / sum(weights) * overlap_vegdist;
-
+    weights[1] / sum(weights) * overlap_vegdist;
+  
   return overlap_index;
-
+  
   if (discrepancy == 1) {
     if(squared == 1) {
       return(pow(1 - overlap_index, 2.0));
@@ -373,7 +434,7 @@ double overlap_spvd(IntegerVector fire_a,
       return(1 - overlap_index);
     }
   }
-
+  
 }
 
 /*** R
@@ -399,50 +460,174 @@ double overlap_spvd(IntegerVector fire_a,
 // -------------------------------------------------------------------------
 
 /*
-
+ 
  función para comparar muchos fuegos. hacerlo en R, estoy tardando too much
+ 
+ //' @title compare_fires
+ //' @description Computes similarity or dissimilarity measures for a matrix of
+ //'   fires (each column is a fire, each row is a pixel) from the same landscape.
+ //'   It allows to compare all fires pairwise or take one as the reference. In
+ //'   that case, the first column is considered, and reference should be set to
+ //'   TRUE.
+ //' @return NumericVector: similarity or discrepancy indexes.
+ //'   If reference = FALSE, the result is a diagonal matrix.
+ //' @param IntegerMatrix fires: matrix with fires in columns, pixels in rows,
+ //'   occurring on the same landscape.
+ //' @param char metric: the similarity/dissimilarity measure desired, options are
+ //'   ("overlap_sp", "overlap_vd", "overlap_spvd", "delta_m"). All except
+ //'   the first require a landscape and veg_types specification.
+ //' @param int veg_types: number of vegetation classes in the landscape.
+ //'   Defaults to 4. (Only used for a few metrics.)
+ //' @param NumericMatrix landscape: matrix with environmental data. This is used
+ //'   to get the burned area by vegetation type for each fire. The first
+ //'   veg_types - 1 columns must have binary vegetation layers, and one
+ //'   vegetation type is taken as background. (Only used for a few metrics.)
+ //' @param NumericVector weights: non-negative weights for spatial overlap and
+ //'   vegetation distribution overlap, respectively. May not be normalized.
+ //' @param bool discrepancy: if true, a discrepancy, and not similarity measure
+ //'   is reported (1 - overlap). (Only used for a few metrics.)
+ //' @param bool squared: whether to return the squared discrepancy or not.
+ //'   Defaults to false. Ignored if discrepancy = FALSE.
+ 
+ double compare_fires(IntegerMatrix fires,
+ NumericMatrix landscape,
+ NumericVector weights = {0.8, 0.2},
+ String metric("overlap_sp"),
+ bool reference = 0,
+ int veg_types = 4,
+ bool discrepancy = 0,
+ bool squared = 0) {
+ 
+ // compare fires when there are only two
+ if(fires.ncol() < 3) {
+ 
+ 
+ 
+ }
+ 
+ }
+ 
+ ///// ALGO NO ANDUVO Y LO ABANDONÉ
+ 
+ */
 
-//' @title compare_fires
-//' @description Computes similarity or dissimilarity measures for a matrix of
-//'   fires (each column is a fire, each row is a pixel) from the same landscape.
-//'   It allows to compare all fires pairwise or take one as the reference. In
-//'   that case, the first column is considered, and reference should be set to
-//'   TRUE.
-//' @return NumericVector: similarity or discrepancy indexes.
-//'   If reference = FALSE, the result is a diagonal matrix.
-//' @param IntegerMatrix fires: matrix with fires in columns, pixels in rows,
-//'   occurring on the same landscape.
-//' @param char metric: the similarity/dissimilarity measure desired, options are
-//'   ("overlap_sp", "overlap_vd", "overlap_spvd", "delta_m"). All except
-//'   the first require a landscape and veg_types specification.
-//' @param int veg_types: number of vegetation classes in the landscape.
-//'   Defaults to 4. (Only used for a few metrics.)
-//' @param NumericMatrix landscape: matrix with environmental data. This is used
-//'   to get the burned area by vegetation type for each fire. The first
-//'   veg_types - 1 columns must have binary vegetation layers, and one
-//'   vegetation type is taken as background. (Only used for a few metrics.)
-//' @param NumericVector weights: non-negative weights for spatial overlap and
-//'   vegetation distribution overlap, respectively. May not be normalized.
-//' @param bool discrepancy: if true, a discrepancy, and not similarity measure
-//'   is reported (1 - overlap). (Only used for a few metrics.)
-//' @param bool squared: whether to return the squared discrepancy or not.
-//'   Defaults to false. Ignored if discrepancy = FALSE.
 
-double compare_fires(IntegerMatrix fires,
-                     NumericMatrix landscape,
-                     NumericVector weights = {0.8, 0.2},
-                     String metric("overlap_sp"),
-                     bool reference = 0,
-                     int veg_types = 4,
-                     bool discrepancy = 0,
-                     bool squared = 0) {
+// ---------------------------------------------------------------------
 
-  // compare fires when there are only two
-  if(fires.ncol() < 3) {
+// Many discrepancy functions
 
+/*
+ * This takes as argument two lists that bear the burned_layer, 
+ * burned_ids (0 indexing) and
+ * counts_veg, the burned pixels by veg_type (shrubland, subalpine, wet, dry).
+ */
 
-
+// [[Rcpp::export]]
+NumericVector compare_fires(List fire1, List fire2) {
+  
+  // Extract list elemnts ------------------------------------------------
+  
+  NumericMatrix burned1 = fire1["burned_layer"];
+  NumericMatrix burned2 = fire2["burned_layer"];
+  
+  IntegerMatrix burned_ids1 = fire1["burned_ids"];
+  IntegerMatrix burned_ids2 = fire2["burned_ids"];
+  
+  double size1 = burned_ids1.ncol();
+  double size2 = burned_ids2.ncol();
+  
+  NumericVector counts1 = fire1["counts_veg"];
+  NumericVector counts2 = fire2["counts_veg"];
+  
+  // overlap_sp -----------------------------------------------------------
+  
+  double common = 0.0;
+  // compute common pixels only in the smaller fire
+  if(size1 <= size2) {
+    for(int i = 0; i < size1; i++) {
+      common += burned2(burned_ids1(0, i), burned_ids1(1, i));
+    }
+  } else {
+    for(int i = 0; i < size2; i++) {
+      common += burned1(burned_ids2(0, i), burned_ids2(1, i));
+    }
   }
-
+  
+  double overlap_sp = common / (size1 + size2 - common);
+  
+  // overlap_vd -----------------------------------------------------------
+  
+  // Get vegetation distribution by fire (normalized burned areas)
+  int veg_types = counts1.length();
+  
+  NumericVector burned_dist_1(veg_types);
+  NumericVector burned_dist_2(veg_types);
+  
+  for(int v = 0; v < veg_types; v++) {
+    burned_dist_1[v] = counts1[v] / sum(counts1);
+    burned_dist_2[v] = counts2[v] / sum(counts2);
+  }
+  
+  // compute vegetation distribution overlap
+  double overlap_vd = 0.0;
+  for(int v = 0; v < veg_types; v++) {
+    overlap_vd += std::min(burned_dist_1[v], burned_dist_2[v]);
+  }
+  
+  // overlap_i -----------------------------------------------------------
+  
+  // overlap index consdering difference in burned area by vegetation type, 
+  // with i from iván
+  double diff_prop_raw = 0.0;
+  
+  for(int v = 0; v < veg_types; v++) {
+    double max_area = std::max(counts1[v], counts2[v]);
+    if(max_area > 0.0) {
+      diff_prop_raw += abs(counts1(v) - counts2(v)) / max_area;
+    }
+  }
+  
+  double veg_num = counts1.length();
+  double overlap_i = 1.0 - diff_prop_raw / veg_num;
+  
+  // delta_m_raw -----------------------------------------------------------
+  
+  // discrepancy index consdering difference in burned area by vegetation type, 
+  // with m from Morales. This overlap is based on the discrepancy function
+  // used in Morales et al. 2015.
+  
+  double delta_m_raw = 0.0;
+  for(int v = 0; v < veg_types; v++) {
+    
+    if(counts1[v] > 0) {
+      delta_m_raw += abs(counts1[v] - counts2[v]) / counts1[v]; 
+    } // first fire is used as reference
+    else {
+      delta_m_raw += abs(counts1[v] - counts2[v]);
+    }
+  }
+  
+  // the same, but using the mean area in the denumerator to make it symmetric
+  double delta_m_mean = 0.0;
+  for(int v = 0; v < veg_types; v++) {
+    
+    double mean_area = (counts1[v] + counts2[v]) / 2.0;
+    
+    if(mean_area > 0) {
+      delta_m_mean += abs(counts1[v] - counts2[v]) / mean_area;
+    }
+  }
+  
+  // ---------------------------------------------------------------------
+  
+  NumericVector indexes = NumericVector::create(
+    Named("overlap_sp") = overlap_sp,
+    Named("overlap_vd") = overlap_vd,
+    Named("overlap_i") = overlap_i,
+    Named("delta_m_raw") = delta_m_raw,
+    Named("delta_m_mean") = delta_m_mean
+  );
+  
+  return indexes;
 }
-*/
+
