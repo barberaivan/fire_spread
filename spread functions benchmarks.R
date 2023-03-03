@@ -3,6 +3,7 @@
 library(terra)
 library(tidyverse)
 library(Rcpp)
+library(RcppClock)     # internal benchmarks
 library(microbenchmark)
 theme_set(theme_bw())
 
@@ -153,3 +154,92 @@ mbm_all; mbm_real
                        # 6.996406 / 529.725118 = 0.01320762
 
 
+
+# Internal benchmark ------------------------------------------------------
+
+# To evaluate whether further improvements are achievable.
+
+# Create landscape.
+coefs <- c(1000, rep(0, 8))
+names(coefs) <- c("intercept",
+                  "subalpine", "wet", "dry",
+                  "fwi",
+                  "aspect",
+                  "wind",
+                  "elev",
+                  "slope")
+### IMPORTANT  ---> wind, elevation and slope parameters must be the last ones.
+
+elev_column <- which(names(coefs) == "elev") - 1
+wind_column <- which(names(coefs) == "wind") - 1 # -1 because the design matrix will have no intercept
+
+# landscape raster
+size <- 30
+n_rows <- size
+n_cols <- size
+
+landscape <- rast(
+  ncol = n_cols, nrow = n_rows,
+  nlyrs = length(coefs) - 2, # intercept and slope absent
+  xmin = -1000, xmax = 1000, ymin = -1000, ymax = 1000,
+  names = names(coefs)[-c(1, length(coefs))]
+)
+
+# fill vegetation
+veg_vals <-  rmultinom(ncell(landscape), size = 1, prob = rep(0.25, 4))[1:3, ] %>% t
+values(landscape)[, 1:3] <- veg_vals
+landscape$fwi <- rnorm(ncell(landscape))            # fwi anomalies
+landscape$aspect <- cos(runif(ncell(landscape), 0, 2 * pi) - 315 * pi / 180)  # northwestyness
+landscape$wind <- runif(ncell(landscape), 0, 2 * pi)    # wind direction in radians
+landscape$elev <- runif(ncell(landscape), 0, 2200)  # m above sea level
+
+# make array landscape for cpp function
+landscape_arr <- array(NA,
+                       dim = c(nrow(landscape), ncol(landscape), nlyr(landscape)))
+landscape_values <- terra::values(landscape) # get values in matrix form
+for(l in 1:nlyr(landscape)) {
+  landscape_arr[, , l] <- matrix(landscape_values[, l],
+                                 nrow(landscape), ncol(landscape),
+                                 byrow = TRUE) # byrow because terra provides
+  # the values this way.
+}
+
+# vector of distances between a cell and its neighbours
+# (used to compute slope effect)
+distances <- rep(res(landscape)[1], 8) # sides
+distances[c(1, 3, 6, 8)] <- res(landscape)[1] * sqrt(2)
+
+# make ignition point(s)
+ig_location <- matrix(data = c(round(nrow(landscape) / 2), round(ncol(landscape) / 2)),
+                      ncol = 1)
+
+# ig_cell <- sample(1:ncell(landscape), 1)
+# ig_location <- rowColFromCell(landscape, ig_cell) %>% t
+
+
+
+
+# Simulate and benchamark
+sourceCpp("spread_functions.cpp")
+
+options(scipen = 999)
+set.seed(12)
+burn_result <- simulate_fire_intbench_cpp(
+  landscape = landscape_arr,
+  burnable = matrix(1, nrow(landscape), ncol(landscape)),
+  ignition_cells = ig_location,
+  coef = coefs,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+)
+intbench
+
+# the if(algo) continue
+# statements are the slowest parts. 
+
+# RcppClock is counting well the number of times each operation occurred, so it's
+# not about wrong counting.
+
+# So we have to try removing the if() continue statements and compare.

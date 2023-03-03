@@ -14,3 +14,8 @@ for all the landscape could be fast. (So, we could do 2 and 1).
 First, test whether the probability computation involves most of the simulation time.
 
 
+
+----
+
+Ignore this, read comment at the end of benchmarks script.
+There are massive improvements to do.
