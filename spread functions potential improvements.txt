@@ -18,4 +18,15 @@ First, test whether the probability computation involves most of the simulation 
 ----
 
 Ignore this, read comment at the end of benchmarks script.
-There are massive improvements to do.
+
+
+----
+2023-03-04
+
+A better idea from Iván R:
+
+Instead of pretending to precompute everything, make a dynamic with the burn probabilities, as arma::cube prob_cube(nrow, ncol, 8). 8 because each pixel has 8 neighbours. Then, probabilites are computed if they were not already present in the cube.
+
+Before implementing that, compare the timing of simulate_fire_mat_cpp and an equivalent function which does not compute the probability, just holds it constant.
+
+The max improvement would be to reduce computation time for 1 fire to 0.7 * previous_time

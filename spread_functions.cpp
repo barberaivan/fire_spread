@@ -6,12 +6,6 @@
 //   https://dcgerard.github.io/advancedr/08_cpp_armadillo.html
 //   https://arma.sourceforge.net/docs.html#subcube
 
-//[[Rcpp::depends(RcppClock)]]
-#include <RcppClock.h>             
-// RcppClock for internal benchmarking. 
-// THE ORDER OF THESE LINES MATTER! WRITE AFTER ARMADILLO LINES.
-
-
 using namespace Rcpp;
 
 /*
@@ -245,7 +239,7 @@ double spread_onepix_prob_cpp(arma::vec data_burning,
 
 // [[Rcpp::depends(RcppArmadillo)]]
 // [[Rcpp::export]]
-IntegerVector simulate_fire_mat_cpp(
+IntegerMatrix simulate_fire_mat_cpp(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
@@ -377,7 +371,7 @@ IntegerVector simulate_fire_mat_cpp(
 
 // [[Rcpp::depends(RcppArmadillo)]]
 // [[Rcpp::export]]
-IntegerVector simulate_fire_mat_deterministic_cpp(
+IntegerMatrix simulate_fire_mat_deterministic_cpp(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
@@ -656,19 +650,11 @@ List simulate_fire_disc(
 }
 
 
-// ------------------------------------------------------------------------
-
-// Beta versions of the functions
-
-// Based on comments in "spread functions potential improvements.txt", I copy
-// the simulate_fire_mat to print the time at different steps.
-// The suffix "intbench" stands for internal benchmark. 
-// RcppClock package will be used, which needs a line at the beginning of this 
-// file.
+// simulate_fire_mat but not computing prob ----------------------------------
 
 // [[Rcpp::depends(RcppArmadillo)]]
 // [[Rcpp::export]]
-IntegerVector simulate_fire_intbench_cpp(
+IntegerMatrix simulate_fire_notprob(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
@@ -677,9 +663,6 @@ IntegerVector simulate_fire_intbench_cpp(
     int elev_layer,
     NumericVector distances,
     double upper_limit) {
-  
-  
-  Rcpp::Clock clock; // FOR THE INTERNAL BENCHMARK
   
   int n_row = burnable.nrow();
   int n_col = burnable.ncol();
@@ -728,82 +711,56 @@ IntegerVector simulate_fire_intbench_cpp(
     
     // b is going to keep the position in burned_ids that have to be evaluated
     // in this burn cycle
-    
-    // BENCHMARKIN THIS LOOP ----------------------------------------------
-    
     for(int b = start; b <= end; b++) {
       
-      clock.tick("get neighbours and focal data");
       // Get burning_cells' data
       arma::vec data_burning = landscape.tube(burned_ids(0, b), burned_ids(1, b));
       
       // get neighbours (adjacent computation here)
       IntegerMatrix neighbours(2, 8);
       for(int i = 0; i < 8; i++) neighbours(_, i) = burned_ids(_, b) + moves(_, i);
-      clock.tock("get neighbours and focal data");
       
       // Loop over neighbours of the focal burning cell
       
-      clock.tick("loop over neighbours");
       for(int n = 0; n < 8; n++) {
         
-        // clock.tick("check neighbour validity");
-        
-        
-        clock.tick("check neighbour validity - in range");
         // Is the cell in range?
         bool out_of_range = (
           (neighbours(0, n) < 0) | (neighbours(0, n) >= n_row) | // check rows
             (neighbours(1, n) < 0) | (neighbours(1, n) >= n_col)   // check cols
         );
-        clock.tock("check neighbour validity - in range");
+        if(out_of_range) continue;
         
-        clock.tick("check neighbour validity - burnable");
         // Is the cell burnable?
         bool burnable_cell = (burned_bin(neighbours(0, n), neighbours(1, n)) == 0) &
-                             (burnable(neighbours(0, n), neighbours(1, n)) == 1);
-        clock.tock("check neighbour validity - burnable");
+          (burnable(neighbours(0, n), neighbours(1, n)) == 1);
         
-        clock.tick("check neighbour validity - if out");
-        if(out_of_range) continue;
-        clock.tock("check neighbour validity - if out");
-        
-        clock.tick("check neighbour validity - if burnable");
         if(!burnable_cell) continue;
-        clock.tock("check neighbour validity - if burnable");
         
-        // clock.tock("check neighbour validity");
-        
-        clock.tick("get neighbour data");
         // obtain data from the neighbour
         arma::vec data_neighbour = landscape.tube(neighbours(0, n), neighbours(1, n));
-        clock.tock("get neighbour data");
         
-        clock.tick("compute probability");
         // simulate fire
-        double pburn = spread_onepix_prob_cpp(
-          data_burning,
-          data_neighbour,
-          coef,
-          n,           // pixel position identifier (for wind and slope effects)
-          wind_layer,
-          elev_layer,
-          distances(n),
-          upper_limit
-        );
-        clock.tock("compute probability");
+        int burn;
 
-        clock.tick("simulate burn");
-        int burn = R::rbinom(1, pburn);
-        clock.tock("simulate burn");
+        double pburn = landscape(1, 1, 1); // subset to mimic the extraction of the saved prob
+        pburn = 1.0;
+        // double pburn = spread_onepix_prob_cpp(
+        //   data_burning,
+        //   data_neighbour,
+        //   coef,
+        //   n,           // pixel position identifier (for wind and slope effects)
+        //   wind_layer,
+        //   elev_layer,
+        //   distances(n),
+        //   upper_limit
+        // );
+        
+        burn = R::rbinom(1, pburn);
         
         //// make deterministic here
-        
-        clock.tick("check burned - if jump");
         if(pburn < 0.5000000000) continue;
-        clock.tock("check burned - if jump");
         
-        clock.tick("write result if burned");
         // If burned,
         // store id of recently burned cell and
         // set 1 in burned_bin
@@ -812,13 +769,10 @@ IntegerVector simulate_fire_intbench_cpp(
         burned_ids(0, end_forward) = neighbours(0, n);
         burned_ids(1, end_forward) = neighbours(1, n);
         burned_bin(neighbours(0, n), neighbours(1, n)) = 1;
-        clock.tock("write result if burned");
+        
       } // end loop over neighbours of burning cell b
-    clock.tock("loop over neighbours");
-    
+      
     } // end loop over burning cells from this cycle
-    
-    // BENCHMARKING END --------------------------------------------------
     
     // update start and end
     start = end + 1;
@@ -826,9 +780,6 @@ IntegerVector simulate_fire_intbench_cpp(
     burning_size = end - start + 1;
     
   } // end while
-  
-  clock.stop("intbench");
-  
   
   return burned_bin;
 }
