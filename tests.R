@@ -73,12 +73,11 @@ distances <- rep(res(landscape)[1], 8) # sides
 distances[c(1, 3, 6, 8)] <- res(landscape)[1] * sqrt(2)
 
 
-# test that the R and C++ functions give the same results
 test_that("R and C++ functions give the same results", {
 
   set.seed(30)
   fire_r <- simulate_fire_mat_r(
-    landscape = lands_sub, # use the SpatRaster
+    landscape = lands_sub,
     burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
     ignition_cells = ig_location,
     coef = c_sub,
@@ -90,7 +89,33 @@ test_that("R and C++ functions give the same results", {
 
   set.seed(30)
   fire_cpp <- simulate_fire_mat_cpp(
-    landscape = land_arr, # use the array
+    landscape = land_arr,
+    burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
+    ignition_cells = ig_location - 1,
+    coef = c_sub,
+    wind_layer = wind_column - 1,
+    elev_layer = elev_column - 1,
+    distances = distances,
+    upper_limit = 1.0
+  )
+
+  expect_equal(fire_r, fire_cpp)
+})
+
+test_that("R and C++ deterministic functions give the same results", {
+  fire_r <- simulate_fire_mat_deterministic_r(
+    landscape = lands_sub,
+    burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
+    ignition_cells = ig_location,
+    coef = c_sub,
+    wind_column = wind_column,
+    elev_column = elev_column,
+    distances = distances,
+    upper_limit = 1.0
+  )
+
+  fire_cpp <- simulate_fire_mat_deterministic_cpp(
+    landscape = land_arr,
     burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
     ignition_cells = ig_location - 1,
     coef = c_sub,
