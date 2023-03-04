@@ -24,6 +24,12 @@ windninja_dir <- "/home/ivan/Insync/Fire spread modelling/data/focal fires data/
 
 fnames <- list.files(gee_dir)
 # 4th is the 1999_28
+# [26] "fire_data_raw_2011_19E.tif"         
+# [27] "fire_data_raw_2011_19W.tif" 
+# [40] "fire_data_raw_2015_47N.tif"         
+# [41] "fire_data_raw_2015_47S.tif"  
+# export only the edited:
+fnames <- fnames[c(26, 27, 40, 41)]
 
 for(i in 1:length(fnames)) {
   print(i)
@@ -56,7 +62,9 @@ for(i in 1:length(fnames)) {
 # Import raw data, wind and fwi -------------------------------------------
 
 # import fire shapes to get year (for fwi matching)
-f <- vect("/home/ivan/Insync/Burned area mapping/patagonian_fires/patagonian_fires/patagonian_fires.shp")
+f <- vect("/home/ivan/Insync/Fire spread modelling/data/patagonian_fires_spread.shp")
+# _spread has the fires edited so every burned separate patch counts as a 
+# separate fire, no matter whether they correspond to the same event or not.
 
 # fwi image
 fwi <- rast("/home/ivan/Insync/Fire spread modelling/data/fwi_anomalies.tif")
@@ -111,8 +119,6 @@ for(i in 1:length(wind_imgs)) {
 # 8                          Plantation    8 (turned into dry forest)
 
 
-
-
 # get years
 fyears <- sapply(fire_ids, function(x) {
   f$year[f$fire_id == x]
@@ -122,12 +128,9 @@ fyears <- sapply(fire_ids, function(x) {
 lands <- vector(mode = "list", length = n_fires)
 names(lands) <- fire_ids
 
-which(fire_ids == "2021_865")
-
 for(i in 1:n_fires) {
   print(i)
-  # i = 45
-  
+  # i = 1
   # get raw image values
   v <- values(raw_imgs[[i]])
   
@@ -191,16 +194,15 @@ for(i in 1:n_fires) {
 }
 
 
-object.size(lands) / 1e6 # 2569.5 Mb
-saveRDS(lands, "lands_temp.rds")
-# lapply(lands, class) # OK?
+object.size(lands) / 1e6 # 2615.9 Mb
+# saveRDS(lands, "lands_temp.rds")
+# sapply(lands, class) %>% unique # OK
 
 
 # Ignition points ---------------------------------------------------------
 
 points_raw <- vect("/home/ivan/Insync/Fire spread modelling/data/ignition_points_checked.shp")
 points <- project(points_raw, raw_imgs[[1]])
-points$Name
 
 for(i in 1:n_fires) {
   # i = 1
@@ -221,7 +223,7 @@ for(i in 1:n_fires) {
   attr(lands[[i]], "ig_rowcol") <- ig_rowcol
 }
 
-attr(lands[[45]], "ig_rowcol")
+# attr(lands[[45]], "ig_rowcol")
 
 # Check all ignition points fall in burned and burnable cells
 ccc <- numeric(n_fires)
