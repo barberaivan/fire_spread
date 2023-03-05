@@ -16,8 +16,15 @@
 library(terra)
 library(tidyverse)
 
-gee_dir <- "/home/ivan/Insync/Fire spread modelling/data/focal fires data/raw data from GEE/"
-windninja_dir <- "/home/ivan/Insync/Fire spread modelling/data/focal fires data/wind ninja files/"
+# get path for data
+local_dir <- normalizePath(getwd(), winslash = "\\", mustWork = TRUE)
+dir_split <- strsplit(local_dir, .Platform$file.sep)[[1]]
+# replace the "fire_spread" directory by "data"
+dir_split[length(dir_split)] <- "fire_spread_data"
+data_path <- paste(dir_split, collapse = .Platform$file.sep)
+
+gee_dir <- paste(data_path, "focal fires data", "raw data from GEE", "", sep = .Platform$file.sep)
+windninja_dir <- paste(data_path, "focal fires data", "wind ninja files", "", sep = .Platform$file.sep)
 
 
 # Export elevations -------------------------------------------------------
@@ -29,7 +36,7 @@ fnames <- list.files(gee_dir)
 # [40] "fire_data_raw_2015_47N.tif"         
 # [41] "fire_data_raw_2015_47S.tif"  
 # export only the edited:
-fnames <- fnames[c(26, 27, 40, 41)]
+# fnames <- fnames[c(26, 27, 40, 41)]
 
 for(i in 1:length(fnames)) {
   print(i)
@@ -62,12 +69,12 @@ for(i in 1:length(fnames)) {
 # Import raw data, wind and fwi -------------------------------------------
 
 # import fire shapes to get year (for fwi matching)
-f <- vect("/home/ivan/Insync/Fire spread modelling/data/patagonian_fires_spread.shp")
+f <- vect(file.path(data_path, "patagonian_fires_spread.shp"))
 # _spread has the fires edited so every burned separate patch counts as a 
 # separate fire, no matter whether they correspond to the same event or not.
 
 # fwi image
-fwi <- rast("/home/ivan/Insync/Fire spread modelling/data/fwi_anomalies.tif")
+fwi <- rast(file.path(data_path, "fwi_anomalies.tif"))
 crs(fwi) <- "EPSG:4326"
 
 fnames <- list.files(gee_dir)
@@ -201,7 +208,7 @@ object.size(lands) / 1e6 # 2615.9 Mb
 
 # Ignition points ---------------------------------------------------------
 
-points_raw <- vect("/home/ivan/Insync/Fire spread modelling/data/ignition_points_checked.shp")
+points_raw <- vect(file.path(data_path, "ignition_points_checked.shp"))
 points <- project(points_raw, raw_imgs[[1]])
 
 for(i in 1:n_fires) {
@@ -242,12 +249,13 @@ for(i in 1:n_fires) {
     stop(paste("Ignition point problems,", "fire_id:", fire_ids[i], "i:", i))
   }
 }
-ccc # perfect.
+ccc # perfect (must be 2).
 
 
 # Save landscapes list ----------------------------------------------------
 
-saveRDS(lands, "/home/ivan/Insync/Fire spread modelling/data/landscapes_ig-known_non-steppe.rds")
+saveRDS(lands, file.path(data_path, "landscapes_ig-known_non-steppe.rds"))
+
 
 
 # OLD CODE BELOW, --------------------------------------------------------

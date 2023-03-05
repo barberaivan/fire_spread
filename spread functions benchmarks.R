@@ -1,11 +1,8 @@
-# benchmarks
-
-options(scipen = 999)
+options(scipen = 999) # turn off scientific notation
 
 library(terra)
 library(tidyverse)
 library(Rcpp)
-library(RcppClock)     # internal benchmarks
 library(microbenchmark)
 theme_set(theme_bw())
 
@@ -13,11 +10,26 @@ sourceCpp("spread_functions.cpp")
 
 # Data preparation --------------------------------------------------------
 
+## the "fire_spread_data" folder must be located in the same directory as the fire_spread
+## repo is.
+
+# get path for data
+local_dir <- normalizePath(getwd(), winslash = "\\", mustWork = TRUE)
+dir_split <- strsplit(local_dir, .Platform$file.sep)[[1]]
+# replace the "fire_spread" directory by "data"
+dir_split[length(dir_split)] <- "fire_spread_data"
+data_path <- paste(dir_split, collapse = .Platform$file.sep)
+
+land_path <- file.path(data_path, "focal fires data", "data_cholila_landscape.rds")
+elev_path <- file.path(data_path, "focal fires data", "data_cholila_elevation.tif")
+
 # import landscape (cholila)
-land <- readRDS("/home/ivan/Insync/Fire spread modelling/data/focal fires data/data_cholila_landscape.rds")
+land <- readRDS(land_path)
 
 # cholila raster file
-land_raster <- rast("/home/ivan/Insync/Fire spread modelling/data/focal fires data/data_cholila_elevation.tif")
+land_raster <- rast(elev_path)
+
+# check
 nrow(land) == ncell(land_raster)
 
 # distances for 30 m resolution
@@ -47,6 +59,7 @@ for(l in 1:ncol(land)) {
                             ncol(land_raster),
                             byrow = TRUE)
 }
+str(land_arr)
 
 # Benchmark cholila saving results ----------------------------------------
 
@@ -69,7 +82,7 @@ sum(fire_cool_m %>% as.numeric) / (nrow(land_raster) * ncol(land_raster))
 
 # version 2
 start_time_cool_m <- Sys.time()
-fire_cool_m <- simulate_fire_mat2_cpp(
+fire_cool_m2 <- simulate_fire_mat2_cpp(
   landscape = land_arr[, , 1:7],
   burnable = matrix(1, nrow(land_raster), ncol(land_raster)),
   ignition_cells = ig_location_mat - 1,
@@ -82,7 +95,7 @@ fire_cool_m <- simulate_fire_mat2_cpp(
 end_time_cool_m <- Sys.time()
 (time_cool_m <- end_time_cool_m - start_time_cool_m)
 # check the fire burned all
-sum(fire_cool_m %>% as.numeric) / sum(land[, "burnable"])
+sum(fire_cool_m2 %>% as.numeric) / sum(land[, "burnable"])
 
 # OK
 
@@ -96,7 +109,7 @@ fire_cool_m <- simulate_fire_mat_cpp(
   wind_layer = 6 - 1,
   elev_layer = 7 - 1,
   distances = distances,
-  upper_limit = 0.27
+  upper_limit = 1
 )
 end_time_cool_m <- Sys.time()
 (time_cool_m <- end_time_cool_m - start_time_cool_m)
@@ -198,12 +211,9 @@ mbm_all; mbm_real
 
 
 
-# Cost of computing spread prob ---------------------------------------------
+# Internal benchmark ------------------------------------------------------
 
-# Check whether saving computed probs could be useful.
-# Compare 
-# simulate_fire_mat_deterministic vs 
-# simulate_fire_noprob.
+# To evaluate whether further improvements are achievable.
 
 # Create landscape.
 coefs <- c(1000, rep(0, 8))
@@ -220,7 +230,7 @@ elev_column <- which(names(coefs) == "elev") - 1
 wind_column <- which(names(coefs) == "wind") - 1 # -1 because the design matrix will have no intercept
 
 # landscape raster
-size <- 100
+size <- 50
 n_rows <- size
 n_cols <- size
 
@@ -263,9 +273,47 @@ ig_location <- matrix(data = c(round(nrow(landscape) / 2), round(ncol(landscape)
 
 
 # Simulate and benchamark
-mmmm <- microbenchmark(
+
+burn_result <- simulate_fire_intbench_cpp(
+  landscape = landscape_arr,
+  burnable = matrix(1, nrow(landscape), ncol(landscape)),
+  ignition_cells = ig_location,
+  coef = coefs,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+)
+intbench
+
+# the if(algo) continue
+# statements are the slowest parts. 
+
+# RcppClock is counting well the number of times each operation occurred, so it's
+# not about wrong counting.
+
+# So we have to try removing the if() continue statements and compare.
+# That is done in _intbench2:
+
+burn_result <- simulate_fire_intbench2_cpp(
+  landscape = landscape_arr,
+  burnable = matrix(1, nrow(landscape), ncol(landscape)),
+  ignition_cells = ig_location,
+  coef = coefs,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+)
+intbench
+
+# sourceCpp("spread_functions.cpp")
+# Remove clocks from latest function, rename as _mat2 and compare with _mat,
+# which is the one using "continue".
+
+mbm2 <- microbenchmark(
   times = 1000,
-  prob = simulate_fire_mat_deterministic_cpp(
+  continue = simulate_fire_mat_deterministic_cpp(
     landscape = landscape_arr,
     burnable = matrix(1, nrow(landscape), ncol(landscape)),
     ignition_cells = ig_location,
@@ -275,7 +323,7 @@ mmmm <- microbenchmark(
     distances = distances,
     upper_limit = 1.0
   ),
-  not_prob = simulate_fire_notprob(
+  if_alone = simulate_fire_mat2_deterministic_cpp(
     landscape = landscape_arr,
     burnable = matrix(1, nrow(landscape), ncol(landscape)),
     ignition_cells = ig_location,
@@ -286,28 +334,11 @@ mmmm <- microbenchmark(
     upper_limit = 1.0
   )
 )
-mmmm
-plot(mmmm)
-aa <- summary(mmmm)
-aa$median[2] / aa$median[1] # 0.705
 
-# sourceCpp("spread_functions.cpp")
-
+mbm2
+plot(mbm2)
+aa <- summary(mbm2)
+aa$median[2] / aa$median[1]
 
 
 
-# Cuentas -----------------------------------------------------------------
-
-# 8 sec (cholila grandes) * 10 replicas * 1000 particulas 
-8 * 10 * 1000 / 3600 # 22.22 h, pero solo si todas las partículas queman mucho, 
-                     # y sin paralelizar.
-# Con la gec3 podría correr en 20 cores, dividir ese tiempo en 10?, y suponiendo
-# que se tarda un 70 % por ciento porque muchas partículas van rápido,
-# 
-8 * 10 * 1000 * 0.7 / (3600 * 10)
-# Uaaaa, quizás una wave tarde 1.55 h
-8 * 10 * 10000 * 0.7 / (3600 * 10)
-# Con lo que sería razonable hacer waves de 10000.
-# Parece que todo va a ser razonable.
-
-# dejemos de joder con optimizar y avancemos con estimar. 
