@@ -27,10 +27,10 @@ elev_path <- file.path(data_path, "focal fires data", "data_cholila_elevation.ti
 land <- readRDS(land_path)
 
 # cholila raster file
-land_raster <- rast(elev_path)
 
-# check
-nrow(land) == ncell(land_raster)
+land_raster <- rast(elev_path)
+assertthat::assert_that(nrow(land) == ncell(land_raster))
+
 
 # distances for 30 m resolution
 distances <- rep(res(land_raster)[1], 8) # sides
@@ -63,94 +63,9 @@ str(land_arr)
 
 # Benchmark cholila saving results ----------------------------------------
 
-# All landscape is burnable:
-start_time_cool_m <- Sys.time()
-fire_cool_m <- simulate_fire_mat_cpp(
-  landscape = land_arr[, , 1:7],
-  burnable = matrix(1, nrow(land_raster), ncol(land_raster)),
-  ignition_cells = ig_location_mat - 1,
-  coef = coefs,
-  wind_layer = 6 - 1,
-  elev_layer = 7 - 1,
-  distances = distances,
-  upper_limit = 1
-)
-end_time_cool_m <- Sys.time()
-(time_cool_m <- end_time_cool_m - start_time_cool_m)
-# check the fire burned all
-sum(fire_cool_m %>% as.numeric) / (nrow(land_raster) * ncol(land_raster))
-
-# version 2
-start_time_cool_m <- Sys.time()
-fire_cool_m2 <- simulate_fire_mat2_cpp(
-  landscape = land_arr[, , 1:7],
-  burnable = matrix(1, nrow(land_raster), ncol(land_raster)),
-  ignition_cells = ig_location_mat - 1,
-  coef = coefs,
-  wind_layer = 6 - 1,
-  elev_layer = 7 - 1,
-  distances = distances,
-  upper_limit = 1
-)
-end_time_cool_m <- Sys.time()
-(time_cool_m <- end_time_cool_m - start_time_cool_m)
-# check the fire burned all
-sum(fire_cool_m2 %>% as.numeric) / sum(land[, "burnable"])
-
-# OK
-
-# Real burnable landscape:
-start_time_cool_m <- Sys.time()
-fire_cool_m <- simulate_fire_mat_cpp(
-  landscape = land_arr[, , 1:7],
-  burnable = land_arr[, , "burnable"],
-  ignition_cells = ig_location_mat - 1,
-  coef = coefs,
-  wind_layer = 6 - 1,
-  elev_layer = 7 - 1,
-  distances = distances,
-  upper_limit = 1
-)
-end_time_cool_m <- Sys.time()
-(time_cool_m <- end_time_cool_m - start_time_cool_m)
-# check the fire burned all
-sum(fire_cool_m %>% as.numeric) / sum(land[, "burnable"])
-# OK
-
-# version 2
-start_time_cool_m <- Sys.time()
-fire_cool_m <- simulate_fire_mat2_cpp(
-  landscape = land_arr[, , 1:7],
-  burnable = land_arr[, , "burnable"],
-  ignition_cells = ig_location_mat - 1,
-  coef = coefs,
-  wind_layer = 6 - 1,
-  elev_layer = 7 - 1,
-  distances = distances,
-  upper_limit = 1
-)
-end_time_cool_m <- Sys.time()
-(time_cool_m <- end_time_cool_m - start_time_cool_m)
-# check the fire burned all
-sum(fire_cool_m %>% as.numeric) / sum(land[, "burnable"])
-# OK
-
-
-# Benchmark cholila with microbenchmark ----------------------------------
-
-# all landscape is burnable
+# All terrain is burnable
 mbm_all <- microbenchmark(
-  cool_mat_continue = simulate_fire_mat_cpp(
-    landscape = land_arr[, , 1:7],
-    burnable = matrix(1, nrow(land_raster), ncol(land_raster)),
-    ignition_cells = ig_location_mat - 1,
-    coef = coefs,
-    wind_layer = 6 - 1,
-    elev_layer = 7 - 1,
-    distances = distances,
-    upper_limit = 1
-  ),
-  cool_mat = simulate_fire_mat2_cpp(     # NOT USING "if() continue"
+  cool_mat = simulate_fire_mat_cpp(
     landscape = land_arr[, , 1:7],
     burnable = matrix(1, nrow(land_raster), ncol(land_raster)),
     ignition_cells = ig_location_mat - 1,
@@ -162,23 +77,13 @@ mbm_all <- microbenchmark(
   ),
   times = 1
 )
-
+"With all terrain burnable"
 mbm_all
 
 
-# real landscape
+# Only real burnable terrain is burnable
 mbm_real <- microbenchmark(
-  cool_mat_continue = simulate_fire_mat_cpp(
-    landscape = land_arr[, , 1:7],
-    burnable = land_arr[, , "burnable"],
-    ignition_cells = ig_location_mat - 1,
-    coef = coefs,
-    wind_layer = 6 - 1,
-    elev_layer = 7 - 1,
-    distances = distances,
-    upper_limit = 1
-  ),
-  cool_mat = simulate_fire_mat2_cpp(
+  cool_mat = simulate_fire_mat_cpp(
     landscape = land_arr[, , 1:7],
     burnable = land_arr[, , "burnable"],
     ignition_cells = ig_location_mat - 1,
@@ -191,7 +96,8 @@ mbm_real <- microbenchmark(
   times = 1
 )
 
-mbm_all; mbm_real
+"With only real burnable terrain"
+mbm_real
 
 # Unit: seconds
 
@@ -272,41 +178,6 @@ ig_location <- matrix(data = c(round(nrow(landscape) / 2), round(ncol(landscape)
 
 
 
-# Simulate and benchamark
-
-burn_result <- simulate_fire_intbench_cpp(
-  landscape = landscape_arr,
-  burnable = matrix(1, nrow(landscape), ncol(landscape)),
-  ignition_cells = ig_location,
-  coef = coefs,
-  wind_layer = wind_column - 1,
-  elev_layer = elev_column - 1,
-  distances = distances,
-  upper_limit = 1.0
-)
-intbench
-
-# the if(algo) continue
-# statements are the slowest parts. 
-
-# RcppClock is counting well the number of times each operation occurred, so it's
-# not about wrong counting.
-
-# So we have to try removing the if() continue statements and compare.
-# That is done in _intbench2:
-
-burn_result <- simulate_fire_intbench2_cpp(
-  landscape = landscape_arr,
-  burnable = matrix(1, nrow(landscape), ncol(landscape)),
-  ignition_cells = ig_location,
-  coef = coefs,
-  wind_layer = wind_column - 1,
-  elev_layer = elev_column - 1,
-  distances = distances,
-  upper_limit = 1.0
-)
-intbench
-
 # sourceCpp("spread_functions.cpp")
 # Remove clocks from latest function, rename as _mat2 and compare with _mat,
 # which is the one using "continue".
@@ -322,23 +193,7 @@ mbm2 <- microbenchmark(
     elev_layer = elev_column - 1,
     distances = distances,
     upper_limit = 1.0
-  ),
-  if_alone = simulate_fire_mat2_deterministic_cpp(
-    landscape = landscape_arr,
-    burnable = matrix(1, nrow(landscape), ncol(landscape)),
-    ignition_cells = ig_location,
-    coef = coefs,
-    wind_layer = wind_column - 1,
-    elev_layer = elev_column - 1,
-    distances = distances,
-    upper_limit = 1.0
   )
 )
 
 mbm2
-plot(mbm2)
-aa <- summary(mbm2)
-aa$median[2] / aa$median[1]
-
-
-
