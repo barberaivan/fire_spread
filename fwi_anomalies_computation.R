@@ -7,8 +7,20 @@
 library(terra)
 library(tidyverse)
 
-source_dir <- "/home/ivan/Insync/Fire spread modelling/data/dataset-cems-fire-historical-fwi-1998-1998-dic-march-all-days/"
-target_dir <- "/home/ivan/Insync/Fire spread modelling/data/"
+# Define directories
+
+# get path for data
+local_dir <- normalizePath(getwd(), winslash = "\\", mustWork = TRUE)
+dir_split <- strsplit(local_dir, .Platform$file.sep)[[1]]
+# replace the "fire_spread" directory by "fire_spread_data"
+dir_split[length(dir_split)] <- "fire_spread_data"
+data_path <- paste(dir_split, collapse = .Platform$file.sep)
+
+source_dir <- file.path(data_path, "dataset-cems-fire-historical-fwi-1998-1998-dic-march-all-days")
+target_dir <- data_path
+
+
+# select files to import
 
 sfiles <- list.files(source_dir)
 length(sfiles)
@@ -54,7 +66,7 @@ for(i in 1:n_years) {
   
   # import daily images
   for(d in 1:length(ids)) {
-    file_name <- paste(source_dir, fdata$name[ids[d]], sep = "")
+    file_name <- file.path(source_dir, fdata$name[ids[d]])
     daily_list[[d]] <- rast(file_name)
   }
   
@@ -81,4 +93,5 @@ for(i in 1:n_years) {
 anom_raster <- rast(anom_list)
 names(anom_raster) <- years
 anom_raster
-writeRaster(anom_raster, paste(target_dir, "fwi_anomalies.tif", sep = ""))
+writeRaster(anom_raster, 
+            file.path(target_dir, "fwi_anomalies.tif"))
