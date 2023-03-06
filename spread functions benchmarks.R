@@ -13,15 +13,8 @@ sourceCpp("spread_functions.cpp")
 ## the "fire_spread_data" folder must be located in the same directory as the fire_spread
 ## repo is.
 
-# get path for data
-local_dir <- normalizePath(getwd(), winslash = "\\", mustWork = TRUE)
-dir_split <- strsplit(local_dir, .Platform$file.sep)[[1]]
-# replace the "fire_spread" directory by "data"
-dir_split[length(dir_split)] <- "fire_spread_data"
-data_path <- paste(dir_split, collapse = .Platform$file.sep)
-
-land_path <- file.path(data_path, "focal fires data", "data_cholila_landscape.rds")
-elev_path <- file.path(data_path, "focal fires data", "data_cholila_elevation.tif")
+land_path <- file.path("..", "fire_spread_data", "focal fires data", "data_cholila_landscape.rds")
+elev_path <- file.path("..", "fire_spread_data", "focal fires data", "data_cholila_elevation.tif")
 
 # import landscape (cholila)
 land <- readRDS(land_path)
@@ -30,7 +23,6 @@ land <- readRDS(land_path)
 
 land_raster <- rast(elev_path)
 assertthat::assert_that(nrow(land) == ncell(land_raster))
-
 
 # distances for 30 m resolution
 distances <- rep(res(land_raster)[1], 8) # sides

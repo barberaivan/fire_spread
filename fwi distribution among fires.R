@@ -3,14 +3,7 @@
 library(terra)
 library(tidyverse)
 
-# get path for data
-local_dir <- normalizePath(getwd(), winslash = "\\", mustWork = TRUE)
-dir_split <- strsplit(local_dir, .Platform$file.sep)[[1]]
-# replace the "fire_spread" directory by "data"
-dir_split[length(dir_split)] <- "fire_spread_data"
-data_path <- paste(dir_split, collapse = .Platform$file.sep)
-
-lands <- readRDS(file.path(data_path, "landscapes_ig-known_non-steppe.rds"))
+lands <- readRDS(file.path("..", "fire_spread_data", "landscapes_ig-known_non-steppe.rds"))
 
 mean_sd_rast <- function(arr) {
   fwi <- as.numeric(arr[, , "fwi"])

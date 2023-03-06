@@ -16,34 +16,22 @@
 library(terra)
 library(tidyverse)
 
-# get path for data
-local_dir <- normalizePath(getwd(), winslash = "\\", mustWork = TRUE)
-dir_split <- strsplit(local_dir, .Platform$file.sep)[[1]]
-# replace the "fire_spread" directory by "data"
-dir_split[length(dir_split)] <- "fire_spread_data"
-data_path <- paste(dir_split, collapse = .Platform$file.sep)
-
-gee_dir <- paste(data_path, "focal fires data", "raw data from GEE", "", sep = .Platform$file.sep)
-windninja_dir <- paste(data_path, "focal fires data", "wind ninja files", "", sep = .Platform$file.sep)
+# get paths
+data_path <- file.path("..", "fire_spread_data")
+gee_dir <- file.path(data_path, "focal fires data", "raw data from GEE")
+windninja_dir <- file.path(data_path, "focal fires data", "wind ninja files")
 
 
 # Export elevations -------------------------------------------------------
 
 fnames <- list.files(gee_dir)
-# 4th is the 1999_28
-# [26] "fire_data_raw_2011_19E.tif"         
-# [27] "fire_data_raw_2011_19W.tif" 
-# [40] "fire_data_raw_2015_47N.tif"         
-# [41] "fire_data_raw_2015_47S.tif"  
-# export only the edited:
-# fnames <- fnames[c(26, 27, 40, 41)]
 
 for(i in 1:length(fnames)) {
   print(i)
-  r <- rast(paste(gee_dir, fnames[i], sep = ""))[["elev"]]
+  r <- rast(file.path(gee_dir, fnames[i]))[["elev"]]
   id_raw <- strsplit(fnames[i], "_")[[1]][-(1:3)]
   id <- paste(id_raw, collapse = "_")
-  writeRaster(r, paste(windninja_dir, id, sep = ""))
+  writeRaster(r, file.path(windninja_dir, id))
 }
 
 # Inputs for wind ninja (avg over study area):
@@ -106,7 +94,7 @@ wind_ids <- sapply(wind_files, function(x) {
 
 wind_imgs <- raw_imgs
 for(i in 1:length(wind_imgs)) {
-  fii <- paste(windninja_dir, wind_files[i], sep = "")
+  fii <- file.path(windninja_dir, wind_files[i])
   wind_imgs[[i]] <- rast(fii)
 }
 

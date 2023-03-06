@@ -9,16 +9,9 @@ library(tidyverse)
 
 # Define directories
 
-# get path for data
-local_dir <- normalizePath(getwd(), winslash = "\\", mustWork = TRUE)
-dir_split <- strsplit(local_dir, .Platform$file.sep)[[1]]
-# replace the "fire_spread" directory by "fire_spread_data"
-dir_split[length(dir_split)] <- "fire_spread_data"
-data_path <- paste(dir_split, collapse = .Platform$file.sep)
-
+data_path <- file.path("..", "fire_spread_data")
 source_dir <- file.path(data_path, "dataset-cems-fire-historical-fwi-1998-1998-dic-march-all-days")
 target_dir <- data_path
-
 
 # select files to import
 
