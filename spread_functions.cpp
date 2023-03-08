@@ -962,7 +962,6 @@ NumericVector compare_fires_try(List fire1, List fire2,
 // [[Rcpp::depends(RcppArmadillo)]]
 // [[Rcpp::export]]
 NumericMatrix emulate_loglik_try(
-    // arguments for simulate_fire
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
@@ -971,11 +970,8 @@ NumericMatrix emulate_loglik_try(
     int elev_layer,
     NumericVector distances,
     double upper_limit,
-    // arguments to compare simulated and observed fire
     List fire_ref,
-    // number of simulated fires
     int n_replicates = 10,
-    // number of indices to compare fires
     int n_indices = 11
 ) {
 
@@ -994,9 +990,25 @@ NumericMatrix emulate_loglik_try(
       distances,
       upper_limit
     );
-
+    
     similarity(i, _) = compare_fires_try(fire_ref, fire_sim);
   }
-
+  
+  CharacterVector names = CharacterVector::create(
+    "overlap_sp",
+    "overlap_vd",
+    "overlap_norm",
+    "overlap_expquad",
+    "overlap_quad",
+    
+    "sp_norm_5050",
+    "sp_norm_7525",
+    "sp_expquad_5050",
+    "sp_expquad_7525",
+    "sp_quad_5050",
+    "sp_quad_7525"
+  );
+  
+  colnames(similarity) = names;
   return similarity;
 }

@@ -853,3 +853,4 @@ loglik_fire1 <- emulate_loglik_try(
   n_replicates = 10
 )
 
+loglik_fire1
