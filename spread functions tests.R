@@ -666,7 +666,7 @@ cc <- simulate_fire_cpp(
 
 par(mfrow = c(1, 2))
 plot(rast_from_mat(cc, lands_sub), col = c("green", "black"), main = "C++ simple")
-plot(rast_from_mat(cc_comp$burned_layer, lands_sub), col = c("green", "black"), 
+plot(rast_from_mat(cc_comp$burned_layer, lands_sub), col = c("green", "black"),
      main = "C++ for comparisons")
 par(mfrow = c(1, 1))
 
@@ -738,8 +738,8 @@ fire2 <- simulate_fire_compare(
   upper_limit = 1.0
 )
 
-comp_rr <- compare_fires_r(fire1, fire2)  
-comp_cc <- compare_fires_try(fire1, fire2)    
+comp_rr <- compare_fires_r(fire1, fire2)
+comp_cc <- compare_fires_try(fire1, fire2)
 
 cbind(comp_rr, comp_cc)
 
@@ -747,14 +747,14 @@ cbind(comp_rr, comp_cc)
 all.equal(comp_rr, comp_cc)
 
 # test the function with equal fires (all indices should be 1)
-comp_rr <- compare_fires_r(fire1, fire1)  
-comp_cc <- compare_fires_try(fire1, fire1)  
+comp_rr <- compare_fires_r(fire1, fire1)
+comp_cc <- compare_fires_try(fire1, fire1)
 # should be true:
 all.equal(comp_rr, comp_cc)
-(c(comp_rr, comp_cc) %>% unique) == 1 
+(c(comp_rr, comp_cc) %>% unique) == 1
 
 
-# test the function with completely disjoint fires 
+# test the function with completely disjoint fires
 # (overlap_sp should be 0)
 
 ig1 <- matrix(data = c(round(nrow(landscape) / 2), 1), ncol = 1)
@@ -781,11 +781,11 @@ fire2 <- simulate_fire_compare(
   upper_limit = 0
 )
 
-comp_rr <- compare_fires_r(fire1, fire2)  
-comp_cc <- compare_fires_try(fire1, fire2)  
+comp_rr <- compare_fires_r(fire1, fire2)
+comp_cc <- compare_fires_try(fire1, fire2)
 # should be true:
 all.equal(comp_rr, comp_cc)
-(c(comp_rr["overlap_sp"], comp_cc["overlap_sp"]) %>% unique) == 0 
+(c(comp_rr["overlap_sp"], comp_cc["overlap_sp"]) %>% unique) == 0
 
 
 
