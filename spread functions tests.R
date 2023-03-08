@@ -789,7 +789,9 @@ all.equal(comp_rr, comp_cc)
 
 
 
-# emulate_loglik tests ------------------------------------------------------
+# emulate_loglik test ------------------------------------------------------
+
+# luego agregar chequeo gráfico.
 
 
 # fill vegetation
@@ -836,8 +838,6 @@ fire1 <- simulate_fire_compare(
   distances = distances,
   upper_limit = 1.0
 )
-
-# still not working
 
 loglik_fire1 <- emulate_loglik_try(
   landscape = landscape_arr, # use the SpatRaster
