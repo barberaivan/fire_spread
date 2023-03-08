@@ -976,8 +976,8 @@ NumericMatrix emulate_loglik_try(
 ) {
 
   NumericMatrix similarity(n_replicates, n_indices);
-
-  for(int i = 0; i < n_replicates; i++) {
+  
+  for(int i = 1; i < n_replicates; i++) {
 
     // simulate_fire
     List fire_sim = simulate_fire_compare(

@@ -791,8 +791,6 @@ all.equal(comp_rr, comp_cc)
 
 # emulate_loglik test ------------------------------------------------------
 
-# luego agregar chequeo gráfico.
-
 
 # fill vegetation
 veg_vals <-  rmultinom(ncell(landscape), size = 1, prob = rep(0.25, 4))[1:3, ] %>% t
@@ -854,3 +852,6 @@ loglik_fire1 <- emulate_loglik_try(
 )
 
 loglik_fire1
+
+
+# TO DO: check metrics with carefully desined landscapes.

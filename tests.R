@@ -127,3 +127,18 @@ test_that("R and C++ deterministic functions give the same results", {
 
   expect_equal(fire_r, fire_cpp)
 })
+
+
+# Tests to add ------------------------------------------------------------
+
+# simulate_fire_cpp and simulate_fire_compare (both in c++) should return the same
+# if the same seed is set. simulate_fire_compare returns a list, and the element
+# "burned_layer" should be the same object returned by simulate_fire_cpp.
+# simulate_fire_compare does not have an R equivalent.
+
+# compare_fires_r (R) and compare_fires_try (c++) should also return the same.
+# They need as input a fire simulated with simulate_fire_compare (not 
+# simulate_fire_cpp).
+
+# See <spread functions test.R> to recycle code.
+ 
