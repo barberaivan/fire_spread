@@ -8,8 +8,6 @@ library(tidyverse)
 sourceCpp("spread_functions.cpp")
 source("spread_functions.R")
 
-
-
 # spread_around test ------------------------------------------------------
 
 
@@ -111,7 +109,7 @@ spread_result_r["probs"] == spread_result_cpp_prob
 
 
 
-# simulate_fire_mat -------------------------------------------------------
+# simulate_fire -------------------------------------------------------
 
 # version of simulate_fire that uses a matrix representation of the landscape
 # to avoid extra computations when obtaining the neighbours.
@@ -177,7 +175,7 @@ ig_cell <- sample(1:ncell(landscape), 1)
 ig_location <- rowColFromCell(landscape, ig_cell) %>% t
 
 set.seed(s)
-burn_result_r <- simulate_fire_mat_deterministic_r(
+burn_result_r <- simulate_fire_deterministic_r(
   landscape = landscape,
   burnable = matrix(1, nrow(landscape), ncol(landscape)),
   ignition_cells = ig_location,
@@ -189,7 +187,7 @@ burn_result_r <- simulate_fire_mat_deterministic_r(
 )
 
 set.seed(s)
-burn_result_cpp <- simulate_fire_mat_deterministic_cpp(
+burn_result_cpp <- simulate_fire_deterministic_cpp(
   landscape = landscape_arr,
   burnable = matrix(1, nrow(landscape), ncol(landscape)),
   ignition_cells = ig_location - 1,
@@ -222,7 +220,6 @@ par(mfrow = c(1, 1))
 
 # luego testear efectos de paisajes particulares y ver si las funciones
 # estocásticas dan patrones similares.
-
 
 # Test landscape effects (matrix representation) --------------------------
 
@@ -307,7 +304,7 @@ c_sub["wind"] <- 0 # remove wind effect
 land_arr <- land_cube(lands_sub)
 
 # Upper half is not flammable, lower is highly flammable
-rr <- simulate_fire_mat_r(
+rr <- simulate_fire_r(
   landscape = lands_sub, # use the SpatRaster
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location,
@@ -318,7 +315,7 @@ rr <- simulate_fire_mat_r(
   upper_limit = 1.0
 ) # good
 
-cc <- simulate_fire_mat_cpp(
+cc <- simulate_fire_cpp(
   landscape = land_arr, # use the array
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location - 1,
@@ -346,7 +343,7 @@ c_sub["wind"] <- 0 # remove wind effect
 
 land_arr <- land_cube(lands_sub)
 
-rr <- simulate_fire_mat_r(
+rr <- simulate_fire_r(
   landscape = lands_sub, # use the SpatRaster
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location,
@@ -357,7 +354,7 @@ rr <- simulate_fire_mat_r(
   upper_limit = 1.0
 ) # good
 
-cc <- simulate_fire_mat_cpp(
+cc <- simulate_fire_cpp(
   landscape = land_arr, # use the array
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location - 1,
@@ -386,7 +383,7 @@ c_sub["wind"] <- 0 # remove wind effect
 
 land_arr <- land_cube(lands_sub)
 
-rr <- simulate_fire_mat_r(
+rr <- simulate_fire_r(
   landscape = lands_sub, # use the SpatRaster
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location,
@@ -397,7 +394,7 @@ rr <- simulate_fire_mat_r(
   upper_limit = 1.0
 ) # good
 
-cc <- simulate_fire_mat_cpp(
+cc <- simulate_fire_cpp(
   landscape = land_arr, # use the array
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location - 1,
@@ -428,7 +425,7 @@ c_sub["intercept"] <- 0
 
 land_arr <- land_cube(lands_sub)
 
-rr <- simulate_fire_mat_r(
+rr <- simulate_fire_r(
   landscape = lands_sub, # use the SpatRaster
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location,
@@ -439,7 +436,7 @@ rr <- simulate_fire_mat_r(
   upper_limit = 1.0
 ) # good
 
-cc <- simulate_fire_mat_cpp(
+cc <- simulate_fire_cpp(
   landscape = land_arr, # use the array
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location - 1,
@@ -472,7 +469,7 @@ c_sub["intercept"] <- -1
 
 land_arr <- land_cube(lands_sub)
 
-rr <- simulate_fire_mat_r(
+rr <- simulate_fire_r(
   landscape = lands_sub, # use the SpatRaster
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location,
@@ -483,7 +480,7 @@ rr <- simulate_fire_mat_r(
   upper_limit = 1.0
 ) # good
 
-cc <- simulate_fire_mat_cpp(
+cc <- simulate_fire_cpp(
   landscape = land_arr, # use the array
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location - 1,
@@ -514,7 +511,7 @@ c_sub["intercept"] <- 1
 # the elevation effect, which is negative. Here the slope effect was removed.
 land_arr <- land_cube(lands_sub)
 
-rr <- simulate_fire_mat_r(
+rr <- simulate_fire_r(
   landscape = lands_sub, # use the SpatRaster
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location,
@@ -525,7 +522,7 @@ rr <- simulate_fire_mat_r(
   upper_limit = 1.0
 ) # good
 
-cc <- simulate_fire_mat_cpp(
+cc <- simulate_fire_cpp(
   landscape = land_arr, # use the array
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location - 1,
@@ -555,7 +552,7 @@ c_sub["intercept"] <- -1
 
 land_arr <- land_cube(lands_sub)
 
-rr <- simulate_fire_mat_r(
+rr <- simulate_fire_r(
   landscape = lands_sub, # use the SpatRaster
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location,
@@ -566,7 +563,7 @@ rr <- simulate_fire_mat_r(
   upper_limit = 1.0
 ) # good
 
-cc <- simulate_fire_mat_cpp(
+cc <- simulate_fire_cpp(
   landscape = land_arr, # use the array
   burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
   ignition_cells = ig_location - 1,
@@ -595,7 +592,7 @@ burnable_sim = matrix(rbinom(ncell(lands_sub), size = 1, prob = 0.5),
 land_arr <- land_cube(lands_sub)
 
 
-rr <- simulate_fire_mat_r(
+rr <- simulate_fire_r(
   landscape = lands_sub, # use the SpatRaster
   burnable = burnable_sim,
   ignition_cells = ig_location,
@@ -606,7 +603,7 @@ rr <- simulate_fire_mat_r(
   upper_limit = 1.0
 ) # good
 
-cc <- simulate_fire_mat_cpp(
+cc <- simulate_fire_cpp(
   landscape = land_arr, # use the array
   burnable = burnable_sim,
   ignition_cells = ig_location - 1,
@@ -625,3 +622,234 @@ par(mfrow = c(1, 1))
 all.equal(cc, rr)
 
 ## All tests are OK
+
+
+# Test simulate_fire_compare ----------------------------------------------
+
+# this function returns a list with objects used to compare fires (simulated
+# vs observed.)
+
+lands_sub <- landscape_base
+c_sub <- rep(0, length(coefs))
+names(c_sub) <- names(coefs)
+c_sub["intercept"] <- 100 # all burns, except non burnable
+
+set.seed(round(runif(1, 1, 2000)))
+burnable_sim = matrix(rbinom(ncell(lands_sub), size = 1, prob = 0.5),
+                      nrow(land_arr), ncol(land_arr))
+
+land_arr <- land_cube(lands_sub)
+
+set.seed(12)
+cc_comp <- simulate_fire_compare(
+  landscape = land_arr, # use the SpatRaster
+  burnable = burnable_sim,
+  ignition_cells = ig_location - 1,
+  coef = c_sub,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+) # good
+
+set.seed(12)
+cc <- simulate_fire_cpp(
+  landscape = land_arr, # use the array
+  burnable = burnable_sim,
+  ignition_cells = ig_location - 1,
+  coef = c_sub,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+) # good
+
+par(mfrow = c(1, 2))
+plot(rast_from_mat(cc, lands_sub), col = c("green", "black"), main = "C++ simple")
+plot(rast_from_mat(cc_comp$burned_layer, lands_sub), col = c("green", "black"), 
+     main = "C++ for comparisons")
+par(mfrow = c(1, 1))
+
+# Here both C++ functions should be the same.
+all.equal(cc, cc_comp$burned_layer)
+
+
+# compare_fires tests ------------------------------------------------------
+
+# use the c++ function simulate_fire_compare and compute the similarity metrics
+# written in c++ and R, to check they give the same result
+
+
+# make landscape with varying vegetation (random)
+
+# fill vegetation
+veg_vals <-  rmultinom(ncell(landscape), size = 1, prob = rep(0.25, 4))[1:3, ] %>% t
+values(landscape)[, 1:3] <- veg_vals
+landscape$fwi <- rnorm(ncell(landscape))            # fwi anomalies
+landscape$aspect <- cos(runif(ncell(landscape), 0, 2 * pi) - 315 * pi / 180)  # northwestyness
+landscape$wind <- runif(ncell(landscape), 0, 2 * pi)    # wind direction in radians
+landscape$elev <- runif(ncell(landscape), 0, 2200)  # m above sea level
+
+# make array landscape for cpp function
+landscape_arr <- land_cube(landscape)
+
+# vector of distances between a cell and its neighbours
+# (used to compute slope effect)
+distances <- rep(res(landscape)[1], 8) # sides
+distances[c(1, 3, 6, 8)] <- res(landscape)[1] * sqrt(2)
+
+# model coefficients
+coefs <- c(0.5,
+           -1.5, -1.3, -0.5,
+           1, 1, 1, 1, 1)
+names(coefs) <- c("intercept",
+                  "subalpine", "wet", "dry",
+                  "fwi",
+                  "aspect",
+                  "wind",
+                  "elev",
+                  "slope")
+
+# make ignition point(s)
+ig_location <- matrix(data = c(round(nrow(landscape) / 2), round(ncol(landscape) / 2)),
+                      ncol = 1)
+
+# simulate fires to compare
+
+fire1 <- simulate_fire_compare(
+  landscape = landscape_arr, # use the SpatRaster
+  burnable = matrix(1, nrow(landscape_arr), ncol(landscape_arr)),
+  ignition_cells = ig_location - 1,
+  coef = coefs,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+)
+
+fire2 <- simulate_fire_compare(
+  landscape = landscape_arr, # use the SpatRaster
+  burnable = matrix(1, nrow(landscape_arr), ncol(landscape_arr)),
+  ignition_cells = ig_location - 1,
+  coef = coefs,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+)
+
+comp_rr <- compare_fires_r(fire1, fire2)  
+comp_cc <- compare_fires_try(fire1, fire2)    
+
+cbind(comp_rr, comp_cc)
+
+# should be true
+all.equal(comp_rr, comp_cc)
+
+# test the function with equal fires (all indices should be 1)
+comp_rr <- compare_fires_r(fire1, fire1)  
+comp_cc <- compare_fires_try(fire1, fire1)  
+# should be true:
+all.equal(comp_rr, comp_cc)
+(c(comp_rr, comp_cc) %>% unique) == 1 
+
+
+# test the function with completely disjoint fires 
+# (overlap_sp should be 0)
+
+ig1 <- matrix(data = c(round(nrow(landscape) / 2), 1), ncol = 1)
+fire1 <- simulate_fire_compare(
+  landscape = landscape_arr, # use the SpatRaster
+  burnable = matrix(1, nrow(landscape_arr), ncol(landscape_arr)),
+  ignition_cells = ig1 - 1,
+  coef = coefs,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 0
+)
+
+ig2 <- matrix(data = c(round(nrow(landscape) / 2), ncol(landscape)), ncol = 1)
+fire2 <- simulate_fire_compare(
+  landscape = landscape_arr, # use the SpatRaster
+  burnable = matrix(1, nrow(landscape_arr), ncol(landscape_arr)),
+  ignition_cells = ig2 - 1,
+  coef = coefs,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 0
+)
+
+comp_rr <- compare_fires_r(fire1, fire2)  
+comp_cc <- compare_fires_try(fire1, fire2)  
+# should be true:
+all.equal(comp_rr, comp_cc)
+(c(comp_rr["overlap_sp"], comp_cc["overlap_sp"]) %>% unique) == 0 
+
+
+
+# emulate_loglik tests ------------------------------------------------------
+
+
+# fill vegetation
+veg_vals <-  rmultinom(ncell(landscape), size = 1, prob = rep(0.25, 4))[1:3, ] %>% t
+values(landscape)[, 1:3] <- veg_vals
+landscape$fwi <- rnorm(ncell(landscape))            # fwi anomalies
+landscape$aspect <- cos(runif(ncell(landscape), 0, 2 * pi) - 315 * pi / 180)  # northwestyness
+landscape$wind <- runif(ncell(landscape), 0, 2 * pi)    # wind direction in radians
+landscape$elev <- runif(ncell(landscape), 0, 2200)  # m above sea level
+
+# make array landscape for cpp function
+landscape_arr <- land_cube(landscape)
+
+# vector of distances between a cell and its neighbours
+# (used to compute slope effect)
+distances <- rep(res(landscape)[1], 8) # sides
+distances[c(1, 3, 6, 8)] <- res(landscape)[1] * sqrt(2)
+
+# model coefficients
+coefs <- c(0.5,
+           -1.5, -1.3, -0.5,
+           1, 1, 1, 1, 1)
+names(coefs) <- c("intercept",
+                  "subalpine", "wet", "dry",
+                  "fwi",
+                  "aspect",
+                  "wind",
+                  "elev",
+                  "slope")
+
+# make ignition point(s)
+ig_location <- matrix(data = c(round(nrow(landscape) / 2), round(ncol(landscape) / 2)),
+                      ncol = 1)
+
+
+# make reference fire (the observed one)
+fire1 <- simulate_fire_compare(
+  landscape = landscape_arr, # use the SpatRaster
+  burnable = matrix(1, nrow(landscape_arr), ncol(landscape_arr)),
+  ignition_cells = ig_location - 1,
+  coef = coefs,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+)
+
+# still not working
+
+loglik_fire1 <- emulate_loglik_try(
+  landscape = landscape_arr, # use the SpatRaster
+  burnable = matrix(1, nrow(landscape_arr), ncol(landscape_arr)),
+  ignition_cells = ig_location - 1,
+  coef = coefs,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0,
+
+  fire_ref = fire1,
+  n_replicates = 10
+)
+

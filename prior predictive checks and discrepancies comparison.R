@@ -1,4 +1,7 @@
 
+# EDIT CODE TO MEET THE STRUCTURE OF NEW LANDSCAPES FILE (0-INDEXING AND LISTS)
+
+
 # Packages and data -------------------------------------------------------
 
 library(terra)
@@ -9,13 +12,14 @@ library(logitnorm)
 library(LaplacesDemon)
 
 sourceCpp("spread_functions.cpp")
-sourceCpp("discrepancy_functions.cpp")
 
 # landscapes for all fires
-lands <- readRDS("/home/ivan/Insync/Fire spread modelling/data/landscapes_ig-known_non-steppe.rds")
+lands <- readRDS(file.path("..", "fire_spread_data", 
+                           "landscapes_ig-known_non-steppe.rds"))
 
 # cholila raster, to use the raster as template for plotting
-choli_raster <- rast("/home/ivan/Insync/Fire spread modelling/data/focal fires data/data_cholila.tif")
+choli_raster <- rast(file.path("..", "fire_spread_data", "focal fires data", 
+                               "data_cholila.tif"))
 
 
 
@@ -132,7 +136,7 @@ curve(dlogitnorm(x, mu_int, sd_int), n = 1000)
 
 # Function to simulate from the prior -------------------------------------
 
-prior_sim <- function(sd_int = 2, r_01 = 0.1, r_z = 0.25) {
+prior_sim <- function(mu_int = 0, sd_int = 2, r_01 = 0.1, r_z = 0.25) {
   betas <- c(
     "intercept" = rnorm(1, mu_int, sd_int),   # shrubland logit (reference class)
     "subalpine" = rnorm(1, 0, sd_int),        # veg coefficients
@@ -169,7 +173,7 @@ dnames <- dimnames(lands[["2015_50"]])$layers
 # pp <- prior_sim()
 # 
 # set.seed(1)
-# fire_prior <- simulate_fire_mat_cpp(
+# fire_prior <- simulate_fire_cpp(
 #   landscape = lands[["2015_50"]][, , 1:7],
 #   burnable = lands[["2015_50"]][, , "burnable"],
 #   ignition_cells = attr(lands[["2015_50"]], "ig_rowcol"),
@@ -226,7 +230,7 @@ dnames <- dimnames(l)$layers
 # 
 #   pp <- prior_sim()
 # 
-#   fire_i <- simulate_fire_disc(
+#   fire_i <- simulate_fire_compare(
 #     landscape = l[, , 1:7],
 #     burnable = l[, , "burnable"],
 #     ignition_cells = attr(l, "ig_rowcol"),
@@ -240,8 +244,6 @@ dnames <- dimnames(l)$layers
 #   #fire_sim[, i] <- as.numeric(fire_i)
 #   fire_sim[[i]] <- list()
 #   fire_sim[[i]]$fire <- fire_i
-#   # save prior to explor relationship between fire size and intercept.
-#   fire_sim[[i]]$prior <- pp
 # 
 #   rm(fire_i) # important to avoid crashing because of memory usage
 #   gc()
@@ -250,15 +252,10 @@ dnames <- dimnames(l)$layers
 # (time_end - time_start) # Time difference of 10.537 mins to simulate 100
 #                         # Time difference of 19.16281 mins to simulate 200
 
-# saveRDS(fire_sim, "files/fire_sim3.rds")    # changed the prior
-
-## Me tira error al final, anda mal esto. Probar qué pasa usando muy pocos 
-## fuegos. Quizás sea una cuestión de la estructura de la lista.
-
-
-fire_sim <- readRDS("files/fire_sim.rds")  # change for 3 later!
-
-
+# saveRDS(fire_sim, file.path("..", "fire_spread_data", "simulations", "fire_sim.rds"))
+# save small subset for tests
+# saveRDS(fire_sim[1:10], file.path("..", "fire_spread_data", "simulations", "fire_sim_for_testing.rds"))
+fire_sim <- readRDS(file.path("..", "fire_spread_data", "simulations", "fire_sim.rds"))
 
 # Compare discrepancies ---------------------------------------------------
 
@@ -277,114 +274,86 @@ sizes_pix <- sapply(1:nsim, function(i) {
 }) 
 sizes <- sizes_pix / sum(as.numeric(l[, , "burnable"]), na.rm = T) * 100 # size as landscape area percentaje
 
-# for(c in 1:(nsim-1)) {  ## this loop also takes long
-#   print(c)
-#   for(r in (c+1):nsim) {
-#     # print(paste("col:", c, "/ row:", r))
-#     r = 1; c = 2
-#     disc_arr[r, c, 1:5] <- compare_fires(fire_sim[[c]], fire_sim[[r]])
-#     disc_arr[r, c, "mean_size"] <- mean(sizes[c], sizes[r])
-#     disc_arr[r, c, "dif_size"] <- abs(sizes[c] - sizes[r])
-#   }
-# } # impresionante lo que mejoró la speed de estas discrepancies.
-# saveRDS(disc_arr, "files/fire_sim_disc_arr2.rds") 
-disc_arr <- readRDS("files/fire_sim_disc_arr2.rds")
+for(c in 1:(nsim-1)) {  ## this loop also takes long
+  print(c)
+  for(r in (c+1):nsim) {
+    # print(paste("col:", c, "/ row:", r))
+    # r = 1; c = 2
+    disc_arr[r, c, 1:length(example)] <- compare_fires(fire_sim[[c]], fire_sim[[r]])
+    disc_arr[r, c, "mean_size"] <- mean(sizes[c], sizes[r])
+    disc_arr[r, c, "dif_size"] <- abs(sizes[c] - sizes[r])
+  }
+}
+saveRDS(disc_arr, file.path("..", "fire_spread_data", "simulations", "fire_sim_disc_arr.rds"))
+disc_arr <- readRDS(file.path("..", "fire_spread_data", "simulations", "fire_sim_disc_arr.rds"))
+
+
+
+# SEGUIR ACÁ, REHACER PLOTS
+
 
 
 # clean array and turn into df
 clean_arr <- function(x) na.omit(as.numeric(x))
 discrep <- apply(disc_arr, 3, clean_arr) %>% as.data.frame()
 
-# compute other discrepancies
-discrep$overlap_spvd <- discrep$overlap_sp * 0.8 + 
-                        discrep$overlap_vd * 0.2
-
-discrep$delta_m <- (1 - discrep$overlap_sp) + discrep$delta_m_raw
-# this is exactly the one used in Morales et al. 2015
-
-# Turn deltas into "overlap", or similarity in [0, 1]
-
-discrep$overlap_m2 <- 1 - truncnorm::ptruncnorm(
-  q = discrep$delta_m_mean,      # like morales, but uses mean in denominator
-  sd = sd(discrep$delta_m_mean),      
-  mean = 0, a = 0, b = Inf
-)
-
-discrep$overlap_m1 <- 1 - truncnorm::ptruncnorm(
-  q = discrep$delta_m_raw,        # uses reference in denominator
-  sd = sd(discrep$delta_m_mean),      
-  mean = 0, a = 0, b = Inf
-)
-
-# sum(discrep$delta_m_raw > 8)/ nrow(discrep) # 25 % is above 8,
-# reaching absurdly high values. Not shown in plots.
-# This is due to absent veg_types in the reference fire, which makes the
-# denominator = 1.
-
-# compare
+# for(i in names(discrep)) {
+#   hist(discrep[, i], main = i)
+# }
 
 
 # Many variables _________________________________________
 
-out_vars <- c("mean_size", "dif_size", "delta_m", "delta_m_raw")
-
-GGally::ggpairs(
-  data = discrep[, -which(names(discrep) %in% out_vars)], 
-  mapping = aes(alpha = 0.1)
-) + 
-  theme_bw() + 
-  theme(panel.grid.minor = element_blank())
-
-ggsave("files/discrepancies_comparison_01_many.png", 
-       width = 23, height = 20, units = "cm")
+# GGally::ggpairs(
+#   data = discrep, 
+#   mapping = aes(alpha = 0.1)
+# ) + 
+#   theme_bw() + 
+#   theme(panel.grid.minor = element_blank())
+# 
+# ggsave(file.path("files", "discrepancies_comparison_01_many.png"), 
+#        width = 23, height = 20, units = "cm")
 
 
 # Overlaps pure _________________________________________
 
-out_vars2 <- c("mean_size", "dif_size", 
-              "delta_m", "delta_m_raw", "delta_m_mean",
-              "overlap_spvd")
+in_vars <- c("overlap_sp", "overlap_vd", 
+             "overlap_norm", "overlap_expquad", "overlap_quad")
 
-GGally::ggpairs(
-  data = discrep[, -which(names(discrep) %in% out_vars2)], 
+p2 <- GGally::ggpairs(
+  data = discrep[, in_vars], 
   mapping = aes(alpha = 0.1)
 ) + 
   theme_bw() + 
   theme(panel.grid.minor = element_blank())
 
-ggsave("files/discrepancies_comparison_02_pure_overlaps.png", 
+ggsave(file.path("files", "discrepancies_comparison_02_pure_overlaps.png"),
+       plot = p2,
        width = 23, height = 20, units = "cm")
 
 
 # Overlap combinations _____________________________________
 
-
-discrep$comb_sp_i_0505 <- discrep$overlap_sp * 0.5 +
-                          discrep$overlap_i * 0.5 
-
-discrep$comb_sp_i_0703 <- discrep$overlap_sp * 0.7 +
-                          discrep$overlap_i * 0.3
-                          
-discrep$comb_sp_m2_0505 <- discrep$overlap_sp * 0.5 +
-                           discrep$overlap_m2 * 0.5                          
-
-discrep$comb_sp_m2_0703 <- discrep$overlap_sp * 0.7 +
-                           discrep$overlap_m2 * 0.3                          
-
-discrep$comb_sp_vd_0703 <- discrep$overlap_sp * 0.7 +
-                           discrep$overlap_vd * 0.3    
-
 in_vars <- c("overlap_sp", 
-             "comb_sp_i_0505", "comb_sp_i_0703", 
-             "comb_sp_m2_0505", "comb_sp_m2_0703",
-             "comb_sp_vd_0703")
+             "sp_norm_5050",
+             "sp_norm_7525",
+             "sp_expquad_5050",
+             "sp_expquad_7525",
+             "sp_quad_5050",
+             "sp_quad_7525")
 
-GGally::ggpairs(
-  data = discrep[, which(names(discrep) %in% in_vars)], 
+p3 <- GGally::ggpairs(
+  data = discrep[, in_vars], 
   mapping = aes(alpha = 0.05)
 ) + 
   theme_bw() + 
   theme(panel.grid.minor = element_blank())
 
-ggsave("files/discrepancies_comparison_03_combinations.png", 
+ggsave(file.path("files", "discrepancies_comparison_03_combinations.png"), 
+       plot = p3,
        width = 23, height = 20, units = "cm")
+
+# Está bien probar estas combinaciones (y el overlap_sp).
+
+# TAREA: LIMPIAR ESTE CÓDIGO, QUE SEA SOLO EXPLORAR DISCREPANCIAS. DEJAR EL 
+# PRIOR CHECK EN OTRO LADO.

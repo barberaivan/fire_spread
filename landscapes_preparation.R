@@ -72,7 +72,7 @@ n_fires <- length(fire_ids)
 # list with raw images
 raw_imgs <- vector(mode = "list", length = length(fnames))
 for(i in 1:length(fnames)) {
-  raw_imgs[[i]] <- rast(paste(gee_dir, fnames[i], sep = ""))
+  raw_imgs[[i]] <- rast(file.path(gee_dir, fnames[i]))
   id_raw <- strsplit(fnames[i], c("_|[.]"))[[1]] 
   remove <- c(1:3, length(id_raw))
   id <- paste(id_raw[-remove], collapse = c("_"))
@@ -126,6 +126,17 @@ names(lands) <- fire_ids
 for(i in 1:n_fires) {
   print(i)
   # i = 1
+    
+  # every fire will be a list
+  elem_names <- c("landscape", "ig_rowcol", 
+                  "burned_layer", "burned_ids", "counts_veg")
+  # landscape and ig_rowcol are used to simulate the fire, while the remaining 
+  # elements are used to compare with simulated ones (these are the same outputs
+  # from the fire simulation function).
+  
+  lands[[i]] <- vector(mode = "list", length = 5)
+  names(lands[[i]]) <- elem_names
+
   # get raw image values
   v <- values(raw_imgs[[i]])
   
@@ -178,18 +189,33 @@ for(i in 1:n_fires) {
                     layers = colnames(land_long))
   )
   
-  for(j in 1:ncol(land_long)) {
+  for(j in 1:ncol(land_long)) { 
     land_arr[, , j] <- matrix(land_long[, j], 
                               nrow = nrow(land_arr),
                               ncol = ncol(land_arr),
                               byrow = TRUE)
-  } # terra gives values of raster by row
+  } # terra gives raster values by row
   
-  lands[[i]] <- land_arr
+  # Fill landscape and burned_layer
+  lands[[i]]$landscape <- land_arr[, , 1:(ncol(land_long) - 1)] # without burned layer
+  lands[[i]]$burned_layer <- land_arr[, , ncol(land_long)]
+  
+  # compute burned_ids (with 0-indexing!)
+  burned_cells <- which(v[, "burned"] == 1)
+  # length(burned_cells) == sum(v[, "burned"])
+  burned_rowcols <- rowColFromCell(raw_imgs[[i]], burned_cells)
+  lands[[i]]$burned_ids <- t(burned_rowcols) - 1 # for 0-indexing!
+  
+  # burned pixels by vegetation type
+  counts_veg <- numeric(4)
+  for(k in 2:4) counts_veg[k] <- sum(veg_mat[, (k-1)] * v[, "burned"]) # non-shrubland
+  counts_veg[1] <- sum(v[, "burned"]) - sum(counts_veg[2:4]) # the remaining is shrubland
+  # sum(counts_veg) == sum(v[, "burned"])
+  lands[[i]]$counts_veg <- counts_veg
 }
 
 
-object.size(lands) / 1e6 # 2615.9 Mb
+object.size(lands) / 1e6 # 2634.7 Mb
 # saveRDS(lands, "lands_temp.rds")
 # sapply(lands, class) %>% unique # OK
 
@@ -215,24 +241,23 @@ for(i in 1:n_fires) {
     stop(paste("Ignition point out of range,", "fire_id", fire_ids[i]))
   }
   
-  attr(lands[[i]], "ig_rowcol") <- ig_rowcol
+  lands[[i]]$ig_rowcol <- ig_rowcol - 1 # 0-indexing!!!
 }
 
-# attr(lands[[45]], "ig_rowcol")
 
 # Check all ignition points fall in burned and burnable cells
 ccc <- numeric(n_fires)
 for(i in 1:n_fires) {
-  # i = 26
-  ig <- attr(lands[[i]], "ig_rowcol")
+  # i = 45
+  ig <- lands[[i]]$ig_rowcol + 1 # because of 0-indexing
   
   point_checks <- sapply(1:ncol(ig), function(c) {
-    lands[[i]][ig[1, c], ig[2, c], c("burned", "burnable")]
+    cbind(lands[[i]]$landscape[ig[1, c], ig[2, c], "burnable"],
+          lands[[i]]$burned_layer[ig[1, c], ig[2, c]])
   }) %>% colSums %>% unique()
   
   ccc[i] <- point_checks
   
-  ss <- sum(lands[[i]][ig[1, ], ig[2, ], c("burned", "burnable")])
   if(point_checks != 2) {
     stop(paste("Ignition point problems,", "fire_id:", fire_ids[i], "i:", i))
   }

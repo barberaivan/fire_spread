@@ -1,3 +1,7 @@
+
+# EDIT CODE TO MEET THE STRUCTURE OF NEW LANDSCAPES FILE (0-INDEXING AND LISTS)
+
+
 options(scipen = 999) # turn off scientific notation
 
 library(terra)
@@ -57,7 +61,7 @@ str(land_arr)
 
 # All terrain is burnable
 mbm_all <- microbenchmark(
-  cool_mat = simulate_fire_mat_cpp(
+  cool_mat = simulate_fire_cpp(
     landscape = land_arr[, , 1:7],
     burnable = matrix(1, nrow(land_raster), ncol(land_raster)),
     ignition_cells = ig_location_mat - 1,
@@ -75,7 +79,7 @@ mbm_all
 
 # Only real burnable terrain is burnable
 mbm_real <- microbenchmark(
-  cool_mat = simulate_fire_mat_cpp(
+  cool_mat = simulate_fire_cpp(
     landscape = land_arr[, , 1:7],
     burnable = land_arr[, , "burnable"],
     ignition_cells = ig_location_mat - 1,
@@ -176,7 +180,7 @@ ig_location <- matrix(data = c(round(nrow(landscape) / 2), round(ncol(landscape)
 
 mbm2 <- microbenchmark(
   times = 1000,
-  continue = simulate_fire_mat_deterministic_cpp(
+  continue = simulate_fire_deterministic_cpp(
     landscape = landscape_arr,
     burnable = matrix(1, nrow(landscape), ncol(landscape)),
     ignition_cells = ig_location,

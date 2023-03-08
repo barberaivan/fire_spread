@@ -76,7 +76,7 @@ distances[c(1, 3, 6, 8)] <- res(landscape)[1] * sqrt(2)
 test_that("R and C++ functions give the same results", {
 
   set.seed(30)
-  fire_r <- simulate_fire_mat_r(
+  fire_r <- simulate_fire_r(
     landscape = lands_sub,
     burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
     ignition_cells = ig_location,
@@ -88,7 +88,7 @@ test_that("R and C++ functions give the same results", {
   )
 
   set.seed(30)
-  fire_cpp <- simulate_fire_mat_cpp(
+  fire_cpp <- simulate_fire_cpp(
     landscape = land_arr,
     burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
     ignition_cells = ig_location - 1,
@@ -103,7 +103,7 @@ test_that("R and C++ functions give the same results", {
 })
 
 test_that("R and C++ deterministic functions give the same results", {
-  fire_r <- simulate_fire_mat_deterministic_r(
+  fire_r <- simulate_fire_deterministic_r(
     landscape = lands_sub,
     burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
     ignition_cells = ig_location,
@@ -114,7 +114,7 @@ test_that("R and C++ deterministic functions give the same results", {
     upper_limit = 1.0
   )
 
-  fire_cpp <- simulate_fire_mat_deterministic_cpp(
+  fire_cpp <- simulate_fire_deterministic_cpp(
     landscape = land_arr,
     burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
     ignition_cells = ig_location - 1,
