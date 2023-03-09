@@ -856,4 +856,4 @@ loglik_fire1 <- emulate_loglik_try(
 loglik_fire1
 
 
-# TO DO: check metrics with carefully desined landscapes.
+# TO DO: check metrics with carefully designed landscapes.

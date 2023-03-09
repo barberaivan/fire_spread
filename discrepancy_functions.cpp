@@ -35,7 +35,7 @@ using namespace Rcpp;
 NumericVector compare_fires_try(List fire1, List fire2,
                                 double lscale = 0.2) {
 
-  // Extract list elemnts ------------------------------------------------
+  // Extract list elements ------------------------------------------------
 
   NumericMatrix burned1 = fire1["burned_layer"];
   NumericMatrix burned2 = fire2["burned_layer"];
@@ -143,7 +143,7 @@ NumericVector compare_fires_try(List fire1, List fire2,
 //'   "_try" because it computes many similarity indexes; after selecting one
 //'   we will have a function to consider only the best one.
 //' @return NumericMatrix(n_replicates, n_metrics): Matrix with each comparison
-//'   metric (colummns) by simulated fire (rows)
+//'   metric (columns) by simulated fire (rows)
 
 //' @param arma::cube landscape: Environmental data from the whole landscape.
 //'   See description in spread_around. The 3rd dimension contains each layer

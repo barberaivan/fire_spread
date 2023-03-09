@@ -50,7 +50,7 @@ moves <- matrix(c(-1,-1,-1,  0,0,  1,1,1,
 #'   spread probability as a function of covariates.
 #' @param IntegerVector position: relative position of the neighbour in
 #'   relation to the burning cell. The eight neighbours are labelled from 0 to
-#'   7 beggining from the upper-left one (by row):
+#'   7 beginning from the upper-left one (by row):
 #'   0 1 2
 #'   3   4
 #'   5 6 7.
@@ -142,7 +142,7 @@ spread_onepix_r <- function(data_burning,
 #' @param IntegerMatrix burnable: matrix indicating if each pixel is burnable
 #' (1) or not (0).
 #' @param IntegerMatrix ignition_cell: row-col id for the cell(s) where the fire
-#'   begun, with a cell by column.
+#'   begins, with a cell by column.
 #' @param NumericVector coef: parameters in logistic regression to compute the
 #'   spread probability as a function of covariates.
 #' @param int wind_column: column in the data (landscape) with wind values.

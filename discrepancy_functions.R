@@ -1,10 +1,10 @@
 library(terra)
 
-# Simmilarity/discrepancy functions ---------------------------------------
+# Similarity/discrepancy functions ---------------------------------------
 
 compare_fires_r <- function(fire1, fire2, lscale = 0.2) {
 
-  # Extract list elemnts ------------------------------------------------
+  # Extract list elements ------------------------------------------------
 
   burned1 <- fire1[["burned_layer"]]
   burned2 <- fire2[["burned_layer"]]
