@@ -187,11 +187,25 @@ NumericMatrix emulate_loglik_try(
     NumericVector distances,
     double upper_limit,
     List fire_ref,
-    int n_replicates = 10,
-    int n_indices = 11
+    int n_replicates = 10
 ) {
 
-  NumericMatrix similarity(n_replicates, n_indices);
+  CharacterVector names = CharacterVector::create(
+    "overlap_sp",
+    "overlap_vd",
+    "overlap_norm",
+    "overlap_expquad",
+    "overlap_quad",
+
+    "sp_norm_5050",
+    "sp_norm_7525",
+    "sp_expquad_5050",
+    "sp_expquad_7525",
+    "sp_quad_5050",
+    "sp_quad_7525"
+  );
+
+  NumericMatrix similarity(n_replicates, names.length());
 
   for(int i = 1; i < n_replicates; i++) {
 
@@ -209,21 +223,6 @@ NumericMatrix emulate_loglik_try(
 
     similarity(i, _) = compare_fires_try(fire_ref, fire_sim);
   }
-
-  CharacterVector names = CharacterVector::create(
-    "overlap_sp",
-    "overlap_vd",
-    "overlap_norm",
-    "overlap_expquad",
-    "overlap_quad",
-
-    "sp_norm_5050",
-    "sp_norm_7525",
-    "sp_expquad_5050",
-    "sp_expquad_7525",
-    "sp_quad_5050",
-    "sp_quad_7525"
-  );
 
   colnames(similarity) = names;
   return similarity;
