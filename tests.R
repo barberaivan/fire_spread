@@ -6,7 +6,8 @@ library(terra)
 
 sourceCpp("spread_functions.cpp")
 source("spread_functions.R")
-
+sourceCpp("similarity_functions.cpp")
+source("similarity_functions.R")
 
 # create data for testing
 coefs <- c(0.5,
@@ -74,7 +75,7 @@ distances <- rep(res(landscape)[1], 8) # sides
 distances[c(1, 3, 6, 8)] <- res(landscape)[1] * sqrt(2)
 
 
-test_that("R and C++ functions give the same results", {
+test_that("Fire spread functions", {
 
   set.seed(30)
   fire_r <- simulate_fire_r(
@@ -100,10 +101,23 @@ test_that("R and C++ functions give the same results", {
     upper_limit = 1.0
   )
 
+  set.seed(30)
+  fire_compare_cpp <- simulate_fire_compare(
+    landscape = land_arr,
+    burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
+    ignition_cells = ig_location - 1,
+    coef = c_sub,
+    wind_layer = wind_column - 1,
+    elev_layer = elev_column - 1,
+    distances = distances,
+    upper_limit = 1.0
+  )
+
   expect_equal(fire_r, fire_cpp)
+  expect_equal(fire_r, fire_compare_cpp$burned_layer)
 })
 
-test_that("R and C++ deterministic functions give the same results", {
+test_that("Deterministic fire spread functions", {
   fire_r <- simulate_fire_deterministic_r(
     landscape = lands_sub,
     burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
@@ -132,14 +146,8 @@ test_that("R and C++ deterministic functions give the same results", {
 
 # Tests to add ------------------------------------------------------------
 
-# simulate_fire_cpp and simulate_fire_compare (both in c++) should return the same
-# if the same seed is set. simulate_fire_compare returns a list, and the element
-# "burned_layer" should be the same object returned by simulate_fire_cpp.
-# simulate_fire_compare does not have an R equivalent.
-
 # compare_fires_r (R) and compare_fires_try (c++) should also return the same.
-# They need as input a fire simulated with simulate_fire_compare (not 
+# They need as input a fire simulated with simulate_fire_compare (not
 # simulate_fire_cpp).
 
 # See <spread functions test.R> to recycle code.
- 
