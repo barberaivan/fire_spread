@@ -143,11 +143,51 @@ test_that("Deterministic fire spread functions", {
   expect_equal(fire_r, fire_cpp)
 })
 
+test_that("Similarity functions", {
+  set.seed(1)
+  fire_1 <- simulate_fire_compare(
+    landscape = land_arr,
+    burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
+    ignition_cells = ig_location - 1,
+    coef = c_sub,
+    wind_layer = wind_column - 1,
+    elev_layer = elev_column - 1,
+    distances = distances,
+    upper_limit = 1.0
+  )
 
-# Tests to add ------------------------------------------------------------
+  set.seed(1)
+  fire_1_ <- simulate_fire_compare(
+    landscape = land_arr,
+    burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
+    ignition_cells = ig_location - 1,
+    coef = c_sub,
+    wind_layer = wind_column - 1,
+    elev_layer = elev_column - 1,
+    distances = distances,
+    upper_limit = 1.0
+  )
 
-# compare_fires_r (R) and compare_fires_try (c++) should also return the same.
-# They need as input a fire simulated with simulate_fire_compare (not
-# simulate_fire_cpp).
+  set.seed(2)
+  fire_2 <- simulate_fire_compare(
+    landscape = land_arr,
+    burnable = matrix(1, nrow(land_arr), ncol(land_arr)),
+    ignition_cells = ig_location - 1,
+    coef = c_sub,
+    wind_layer = wind_column - 1,
+    elev_layer = elev_column - 1,
+    distances = distances,
+    upper_limit = 1.0
+  )
 
-# See <spread functions test.R> to recycle code.
+  expect_equal(fire_1, fire_1_)
+
+  similarity_cpp_1_2 <- compare_fires_try(fire_1, fire_2)
+  similarity_r_1_2 <- compare_fires_r(fire_1, fire_2)
+
+  expect_equal(similarity_cpp_1_2, similarity_r_1_2)
+
+  similarity_1_1 <- compare_fires_try(fire_1, fire_1)
+
+  expect_equal(unname(similarity_1_1), rep(1, length(similarity_1_1)))
+})
