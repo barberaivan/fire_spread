@@ -7,6 +7,8 @@ library(tidyverse)
 # load cpp and R functions:
 sourceCpp("spread_functions.cpp")
 source("spread_functions.R")
+sourceCpp("discrepancy_functions.cpp")
+source("discrepancy_functions.R")
 
 # spread_around test ------------------------------------------------------
 
