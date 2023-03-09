@@ -44,8 +44,8 @@ moves <- matrix(c(-1,-1,-1,  0,0,  1,1,1,
 
 #' @param NumericVector data_burning: environmental data from burning cell
 #'   (the most important here are wind direction and elevation).
-#' @param NumericMatrix data_neighbours: environmental data from target
-#'   neighbours with a column by landscape layer.
+#' @param NumericVector data_neighbour: environmental data from target
+#'   neighbour with a column by landscape layer.
 #' @param NumericVector coef: parameters in logistic regression to compute the
 #'   spread probability as a function of covariates.
 #' @param IntegerVector position: relative position of the neighbour in
@@ -56,13 +56,12 @@ moves <- matrix(c(-1,-1,-1,  0,0,  1,1,1,
 #'   5 6 7.
 #'   This is necessary to compute the elevation and wind effects, as they
 #'   depend on the angle and distance between burning and target pixels.
+#' @param int distance: distance (m) between burning and target cells. Used to
+#'   compute the elevation effect. This vector depends on the neighbourhood
+#'   design and on the pixel scale. If unchanged, it's always the same.
 #' @param int wind_column: column in the data (landscape) with wind value.
 #' @param int elev_column: column in the data (landscape) with elevation value.
 #'   Wind and elevation columns must be the last 2.
-#' @param NumericVector distances: distances (m) between burning and target cells,
-#'   in the same order as positions. Used to compute the elevation effect.
-#'   This vector depends on the neighbourhood design and on the pixel scale.
-#'   If unchanged, it's always the same.
 #' @param double upper_limit: upper limit for spread probability (setting to
 #'   1 makes absurdly large fires).
 
@@ -87,8 +86,6 @@ moves <- matrix(c(-1,-1,-1,  0,0,  1,1,1,
 #'   elevation,  (note slope comes after elevation)
 #'   [slope],    (downhill or uphill, (-1, 1): 0 = flat, 1 = above, -1 = below)
 
-
-# The same function but to be used for a single pixel
 spread_onepix_r <- function(data_burning,
                             data_neighbour,
                             coef,
@@ -142,22 +139,24 @@ spread_onepix_r <- function(data_burning,
 #'   whole landscape. It is meant to be turned into an array
 #'   [rows, cols, layers], but having the terra object is convenient for
 #'   plotting.
+#' @param IntegerMatrix burnable: matrix indicating if each pixel is burnable
+#' (1) or not (0).
 #' @param IntegerMatrix ignition_cell: row-col id for the cell(s) where the fire
 #'   begun, with a cell by column.
-#' @param IntegerMatrix burnable: matrix indicating if each pixel is burnable (1)
-#'   or not (0).
 #' @param NumericVector coef: parameters in logistic regression to compute the
 #'   spread probability as a function of covariates.
-#' @param int wind_layer: layer in the data (landscape) with wind values.
-#' @param int elev_layer: layer in the data (landscape) with elevation values.
-#'   Wind and elevation layers must be the last 2.
-#' @param NumericVector distances: distances (m) between burning and target cells,
-#'   in the same order as positions. Used to compute the elevation effect.
+#' @param int wind_column: column in the data (landscape) with wind values.
+#' @param int elev_column: column in the data (landscape) with elevation values.
+#'   Wind and elevation columns must be the last 2.
+#' @param NumericVector distances: distances (m) between burning and target
+#'   cells, in the same order as positions.
+#'   Used to compute the elevation effect.
 #'   This vector depends on the neighbourhood design and on the pixel scale.
 #'   If unchanged, it's always the same.
 #' @param double upper_limit: upper limit for spread probability (setting to
 #'   1 makes absurdly large fires).
-
+#' @param bool plot_animation: whether to plot the fire progress while running
+#'   or not (set to FALSE by default).
 simulate_fire_r <- function(
     landscape,
     burnable,

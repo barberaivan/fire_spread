@@ -66,13 +66,13 @@ NumericVector angles = angles_raw * M_PI / 180; // in radians!
 //' @return int burn {0, 1} indicating whether the pixel burned or not.
 //'
 //' @param arma::vec data_burning: environmental data from burning cell.
-//' @param arma::vec data_neighbours: environmental data from target neighbours.
+//' @param arma::vec data_neighbour: environmental data from target neighbour.
 //' @param NumericVector coef: parameters in logistic regression to compute the
 //'   spread probability as a function of covariates. It has one more elements
 //'   than the columns of data_ because it includes the intercept.
-//' @param IntegerVector position: relative position of the neighbour in
-//'   relation to the burning cell. The eight neighbours are labelled from 0 to
-//'   7 beginning from the upper-left one (by row):
+//' @param int position: relative position of the neighbour in relation to the
+//' burning cell. The eight neighbours are labelled from 0 to 7 beginning from
+//' the upper-left one (by row):
 //'   0 1 2
 //'   3   4
 //'   5 6 7.
@@ -81,8 +81,8 @@ NumericVector angles = angles_raw * M_PI / 180; // in radians!
 //' @param int wind_column: column in the data (landscape) with wind value.
 //' @param int elev_column: column in the data (landscape) with elevation value.
 //'   Wind and elevation columns must be the last 2.
-//' @param NumericVector distances: distances (m) between burning and target cells,
-//'   in the same order as positions. Used to compute the elevation effect.
+//' @param double distances: distance (m) between burning and target cell. Used
+//' to compute the elevation effect.
 //'   This vector depends on the neighbourhood design and on the pixel scale.
 //'   If unchanged, it's always the same.
 //' @param double upper_limit: upper limit for spread probability (setting to
@@ -206,7 +206,7 @@ double spread_onepix_prob_cpp(arma::vec data_burning,
 //'   This vector is converted from the burned layer (which is a matrix) by row,
 //'   as terra does.
 
-//' @param List landscape: environmental data from the whole landscape.
+//' @param arma::cube landscape: environmental data from the whole landscape.
 //'   See description in spread_around. Every element in the list is a layer in
 //'   matrix representation, with rows and columns displayed as they are in the
 //'   landscape (not transposed!).
@@ -217,17 +217,6 @@ double spread_onepix_prob_cpp(arma::vec data_burning,
 //'   or not (0).
 //' @param NumericVector coef: parameters in logistic regression to compute the
 //'   spread probability as a function of covariates.
-//' @param IntegerVector positions: position of each neighbour in
-//'   relation to the burning cell. The eight neighbours are labelled from 0 to
-//'   7 beginning from the upper-left corner (by row):
-//'   0 1 2
-//'   3   4
-//'   5 6 7.
-//'   This is necessary to compute the elevation and wind effects, as they
-//'   depend on the angle and distance between burning and target pixels.
-//'   (Sometimes not all neighbours are burnable, so this vector will not
-//'   always be complete.)
-//' @param IntegerMatrix moves: see adjacent_cpp0 documentation.
 //' @param int wind_layer: layer in the data (landscape) with wind matrix.
 //' @param int elev_layer: layer in the data (landscape) with elevation matrix.
 //'   Wind and elevation layers must be the last 2.

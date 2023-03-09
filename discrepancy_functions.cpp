@@ -145,7 +145,7 @@ NumericVector compare_fires_try(List fire1, List fire2,
 //' @return NumericMatrix(n_replicates, n_metrics): Matrix with each comparison
 //'   metric (colummns) by simulated fire (rows)
 
-//' @param array(3D) landscape: Environmental data from the whole landscape.
+//' @param arma::cube landscape: Environmental data from the whole landscape.
 //'   See description in spread_around. The 3rd dimension contains each layer
 //'   (covariates). The landscape is represented in matrix form.
 //' @param IntegerMatrix ignition_cells(2, burning_cells): row and column id for
