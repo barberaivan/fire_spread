@@ -16,7 +16,7 @@ mean_sd_rast <- function(arr) {
 summs <- sapply(lands, mean_sd_rast) %>% t %>% as.data.frame
 
 years <- sapply(names(lands), function(n) {
-  strsplit(n, "_")[[1]][1] 
+  strsplit(n, "_")[[1]][1]
 }) %>% unname
 years[years == "CoVentana"] <- "1999"
 years[years == "CoCampana"] <- "2002"
@@ -29,23 +29,23 @@ summs$area_ha <- summs$area_pix * 0.09 # pixel is 30 * 30 m
 
 theme_set(theme_bw())
 
-ggplot(summs, aes(mean, area_ha)) + 
+ggplot(summs, aes(mean, area_ha)) +
   geom_smooth(method = "glm",
               method.args = list(family = Gamma(link = "log"))) +
   # geom_smooth() +
   geom_point(size = 3, alpha = 0.7) +
-  theme(panel.grid.minor = element_blank()) + 
-  ylab("Fire area (ha)") + 
+  theme(panel.grid.minor = element_blank()) +
+  ylab("Fire area (ha)") +
   xlab("FWI standardized (landscape mean)")
 
 ggsave("files/fwi_area.png",
        width = 10, height = 8, units = "cm")
 
-ggplot(summs, aes(mean, area_ha)) + 
-  geom_smooth(method = "lm") + 
+ggplot(summs, aes(mean, area_ha)) +
+  geom_smooth(method = "lm") +
   geom_point(size = 3, alpha = 0.7) +
-  theme(panel.grid.minor = element_blank()) + 
-  ylab("Fire area (ha, log10)") + 
+  theme(panel.grid.minor = element_blank()) +
+  ylab("Fire area (ha, log10)") +
   xlab("FWI standardized (landscape mean)") +
   scale_y_continuous(trans = "log10")
 
@@ -59,7 +59,7 @@ ydata <- aggregate(cbind(mean, sd) ~ year, summs, mean)
 hist(ydata$sd, xlim = c(0, 1.5)); abline(v = sd(ydata$mean))
 
 hist(summs$sd, xlim = c(0, 2),
-     xlab = "sd(FWI) whithin landscapes", 
+     xlab = "sd(FWI) whithin landscapes",
      main = NULL)
 abline(v = sd(ydata$mean), col = "red", lty = 2, lwd = 1.5)
 abline(v = sd(summs$mean), col = "blue", lty = 2, lwd = 1.5)

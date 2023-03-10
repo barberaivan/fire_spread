@@ -14,11 +14,11 @@ library(LaplacesDemon)
 sourceCpp("spread_functions.cpp")
 
 # landscapes for all fires
-lands <- readRDS(file.path("..", "fire_spread_data", 
+lands <- readRDS(file.path("..", "fire_spread_data",
                            "landscapes_ig-known_non-steppe.rds"))
 
 # cholila raster, to use the raster as template for plotting
-choli_raster <- rast(file.path("..", "fire_spread_data", "focal fires data", 
+choli_raster <- rast(file.path("..", "fire_spread_data", "focal fires data",
                                "data_cholila.tif"))
 
 
@@ -48,9 +48,9 @@ r_z <- 0.25
 
 par(mfrow = c(1, 2))
 #normal
-curve(upper_limit * plogis(abs(rnorm(1, 0, sd_z)) * x), 
+curve(upper_limit * plogis(abs(rnorm(1, 0, sd_z)) * x),
       main = paste("Normal(sd = ", sd_z, ")", sep = ""),
-      from = -5, to = 5, col = rgb(0, 0, 0, 0.1), 
+      from = -5, to = 5, col = rgb(0, 0, 0, 0.1),
       ylab = "burn prob",
       xlab = "[-1, 1] variable",
       ylim = c(0, upper_limit))
@@ -60,9 +60,9 @@ for(i in 1:1000) {
 }
 
 # exponential
-curve(upper_limit * plogis(rexp(1, r_z) * x), 
+curve(upper_limit * plogis(rexp(1, r_z) * x),
       main = paste("exponential (r = ", r_z, ")", sep = ""),
-      from = -5, to = 5, col = rgb(0, 0, 0, 0.1), 
+      from = -5, to = 5, col = rgb(0, 0, 0, 0.1),
       ylab = "burn prob",
       xlab = "standardized variable",
       ylim = c(0, upper_limit))
@@ -95,9 +95,9 @@ r_01 <- 0.15
 par(mfrow = c(1, 2))
 
 #normal
-curve(upper_limit * plogis(abs(rnorm(1, 0, sd_01)) * x), 
+curve(upper_limit * plogis(abs(rnorm(1, 0, sd_01)) * x),
       main = paste("Normal(sd = ", sd_01, ")", sep = ""),
-      from = -1, to = 1, col = rgb(0, 0, 0, 0.1), 
+      from = -1, to = 1, col = rgb(0, 0, 0, 0.1),
       ylab = "burn prob",
       xlab = "[-1, 1] variable",
       ylim = c(0, upper_limit))
@@ -107,9 +107,9 @@ for(i in 1:1000) {
 }
 
 # exponential
-curve(upper_limit * plogis(rexp(1, r_01) * x), 
+curve(upper_limit * plogis(rexp(1, r_01) * x),
       main = paste("exponential (r = ", r_01, ")", sep = ""),
-      from = -1, to = 1, col = rgb(0, 0, 0, 0.1), 
+      from = -1, to = 1, col = rgb(0, 0, 0, 0.1),
       ylab = "burn prob",
       xlab = "[-1, 1] variable",
       ylim = c(0, upper_limit))
@@ -122,7 +122,7 @@ par(mfrow = c(1, 1))
 
 
 # densities
-curve(dnorm(x, 0, sd_01) * 2, from = 0, to = 20, 
+curve(dnorm(x, 0, sd_01) * 2, from = 0, to = 20,
       ylim = c(0, 0.18))
 curve(dexp(x, r_01), col = 2, add = TRUE)
 
@@ -142,13 +142,13 @@ prior_sim <- function(mu_int = 0, sd_int = 2, r_01 = 0.1, r_z = 0.25) {
     "subalpine" = rnorm(1, 0, sd_int),        # veg coefficients
     "wet" = rnorm(1, 0, sd_int),
     "dry" = rnorm(1, 0, sd_int),
-    "fwi" = rexp(1, r_z),                     # positive 
+    "fwi" = rexp(1, r_z),                     # positive
     "aspect" = rexp(1, r_01),                 # positive (northing)
     "wind" = rexp(1, r_01),                   # positive
     "elevation" = (-1) * rexp(1, r_z),        # negative
     "slope" = rexp(1, r_01)                   # positive
   )
-  
+
   return(betas)
 }
 
@@ -171,7 +171,7 @@ rast_from_mat <- function(m, fill_raster) { # fill_raster is a SpatRaster from t
 dnames <- dimnames(lands[["2015_50"]])$layers
 
 # pp <- prior_sim()
-# 
+#
 # set.seed(1)
 # fire_prior <- simulate_fire_cpp(
 #   landscape = lands[["2015_50"]][, , 1:7],
@@ -183,7 +183,7 @@ dnames <- dimnames(lands[["2015_50"]])$layers
 #   distances = distances,
 #   upper_limit = upper_limit
 # )
-# 
+#
 # r <- rast_from_mat(fire_prior, choli_raster[[1]])
 # plot(r, col = c("black", "red"))
 
@@ -202,11 +202,11 @@ dnames <- dimnames(lands[["2015_50"]])$layers
 # )
 # r2 <- rast_from_mat(fire_prior_2$burned_layer, choli_raster[[1]])
 # plot(r2, col = c("black", "red"))
-# 
+#
 # fire_prior_2$burned_ids %>% ncol
 # sum(colSums(fire_prior_2$burned_layer))
 # sum(fire_prior_2$counts_veg) # OK
-# 
+#
 # ff <- fire_prior_2[2:3]
 # str(ff)
 
@@ -227,9 +227,9 @@ dnames <- dimnames(l)$layers
 # time_start <- Sys.time()
 # for(i in 1:many) {
 #   print(i)
-# 
+#
 #   pp <- prior_sim()
-# 
+#
 #   fire_i <- simulate_fire_compare(
 #     landscape = l[, , 1:7],
 #     burnable = l[, , "burnable"],
@@ -240,11 +240,11 @@ dnames <- dimnames(l)$layers
 #     distances = distances,
 #     upper_limit = upper_limit
 #   )
-# 
+#
 #   #fire_sim[, i] <- as.numeric(fire_i)
 #   fire_sim[[i]] <- list()
 #   fire_sim[[i]]$fire <- fire_i
-# 
+#
 #   rm(fire_i) # important to avoid crashing because of memory usage
 #   gc()
 # }
@@ -271,7 +271,7 @@ disc_arr <- array(NA, dim = c(nsim, nsim, length(example) + 2),
 # compute fire sizes
 sizes_pix <- sapply(1:nsim, function(i) {
   sum(fire_sim[[i]]$counts_veg)
-}) 
+})
 sizes <- sizes_pix / sum(as.numeric(l[, , "burnable"]), na.rm = T) * 100 # size as landscape area percentaje
 
 for(c in 1:(nsim-1)) {  ## this loop also takes long
@@ -305,26 +305,26 @@ discrep <- apply(disc_arr, 3, clean_arr) %>% as.data.frame()
 # Many variables _________________________________________
 
 # GGally::ggpairs(
-#   data = discrep, 
+#   data = discrep,
 #   mapping = aes(alpha = 0.1)
-# ) + 
-#   theme_bw() + 
+# ) +
+#   theme_bw() +
 #   theme(panel.grid.minor = element_blank())
-# 
-# ggsave(file.path("files", "discrepancies_comparison_01_many.png"), 
+#
+# ggsave(file.path("files", "discrepancies_comparison_01_many.png"),
 #        width = 23, height = 20, units = "cm")
 
 
 # Overlaps pure _________________________________________
 
-in_vars <- c("overlap_sp", "overlap_vd", 
+in_vars <- c("overlap_sp", "overlap_vd",
              "overlap_norm", "overlap_expquad", "overlap_quad")
 
 p2 <- GGally::ggpairs(
-  data = discrep[, in_vars], 
+  data = discrep[, in_vars],
   mapping = aes(alpha = 0.1)
-) + 
-  theme_bw() + 
+) +
+  theme_bw() +
   theme(panel.grid.minor = element_blank())
 
 ggsave(file.path("files", "discrepancies_comparison_02_pure_overlaps.png"),
@@ -334,7 +334,7 @@ ggsave(file.path("files", "discrepancies_comparison_02_pure_overlaps.png"),
 
 # Overlap combinations _____________________________________
 
-in_vars <- c("overlap_sp", 
+in_vars <- c("overlap_sp",
              "sp_norm_5050",
              "sp_norm_7525",
              "sp_expquad_5050",
@@ -343,17 +343,17 @@ in_vars <- c("overlap_sp",
              "sp_quad_7525")
 
 p3 <- GGally::ggpairs(
-  data = discrep[, in_vars], 
+  data = discrep[, in_vars],
   mapping = aes(alpha = 0.05)
-) + 
-  theme_bw() + 
+) +
+  theme_bw() +
   theme(panel.grid.minor = element_blank())
 
-ggsave(file.path("files", "discrepancies_comparison_03_combinations.png"), 
+ggsave(file.path("files", "discrepancies_comparison_03_combinations.png"),
        plot = p3,
        width = 23, height = 20, units = "cm")
 
 # Está bien probar estas combinaciones (y el overlap_sp).
 
-# TAREA: LIMPIAR ESTE CÓDIGO, QUE SEA SOLO EXPLORAR DISCREPANCIAS. DEJAR EL 
+# TAREA: LIMPIAR ESTE CÓDIGO, QUE SEA SOLO EXPLORAR DISCREPANCIAS. DEJAR EL
 # PRIOR CHECK EN OTRO LADO.

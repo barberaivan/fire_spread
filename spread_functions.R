@@ -44,25 +44,24 @@ moves <- matrix(c(-1,-1,-1,  0,0,  1,1,1,
 
 #' @param NumericVector data_burning: environmental data from burning cell
 #'   (the most important here are wind direction and elevation).
-#' @param NumericMatrix data_neighbours: environmental data from target
-#'   neighbours with a column by landscape layer.
+#' @param NumericVector data_neighbour: environmental data from target
+#'   neighbour with a column by landscape layer.
 #' @param NumericVector coef: parameters in logistic regression to compute the
 #'   spread probability as a function of covariates.
 #' @param IntegerVector position: relative position of the neighbour in
 #'   relation to the burning cell. The eight neighbours are labelled from 0 to
-#'   7 beggining from the upper-left one (by row):
+#'   7 beginning from the upper-left one (by row):
 #'   0 1 2
 #'   3   4
 #'   5 6 7.
 #'   This is necessary to compute the elevation and wind effects, as they
 #'   depend on the angle and distance between burning and target pixels.
+#' @param int distance: distance (m) between burning and target cells. Used to
+#'   compute the elevation effect. This vector depends on the neighbourhood
+#'   design and on the pixel scale. If unchanged, it's always the same.
 #' @param int wind_column: column in the data (landscape) with wind value.
 #' @param int elev_column: column in the data (landscape) with elevation value.
 #'   Wind and elevation columns must be the last 2.
-#' @param NumericVector distances: distances (m) between burning and target cells,
-#'   in the same order as positions. Used to compute the elevation effect.
-#'   This vector depends on the neighbourhood design and on the pixel scale.
-#'   If unchanged, it's always the same.
 #' @param double upper_limit: upper limit for spread probability (setting to
 #'   1 makes absurdly large fires).
 
@@ -87,8 +86,6 @@ moves <- matrix(c(-1,-1,-1,  0,0,  1,1,1,
 #'   elevation,  (note slope comes after elevation)
 #'   [slope],    (downhill or uphill, (-1, 1): 0 = flat, 1 = above, -1 = below)
 
-
-# The same function but to be used for a single pixel
 spread_onepix_r <- function(data_burning,
                             data_neighbour,
                             coef,
@@ -142,22 +139,24 @@ spread_onepix_r <- function(data_burning,
 #'   whole landscape. It is meant to be turned into an array
 #'   [rows, cols, layers], but having the terra object is convenient for
 #'   plotting.
+#' @param IntegerMatrix burnable: matrix indicating if each pixel is burnable
+#' (1) or not (0).
 #' @param IntegerMatrix ignition_cell: row-col id for the cell(s) where the fire
-#'   begun, with a cell by column.
-#' @param IntegerMatrix burnable: matrix indicating if each pixel is burnable (1)
-#'   or not (0).
+#'   begins, with a cell by column.
 #' @param NumericVector coef: parameters in logistic regression to compute the
 #'   spread probability as a function of covariates.
-#' @param int wind_layer: layer in the data (landscape) with wind values.
-#' @param int elev_layer: layer in the data (landscape) with elevation values.
-#'   Wind and elevation layers must be the last 2.
-#' @param NumericVector distances: distances (m) between burning and target cells,
-#'   in the same order as positions. Used to compute the elevation effect.
+#' @param int wind_column: column in the data (landscape) with wind values.
+#' @param int elev_column: column in the data (landscape) with elevation values.
+#'   Wind and elevation columns must be the last 2.
+#' @param NumericVector distances: distances (m) between burning and target
+#'   cells, in the same order as positions.
+#'   Used to compute the elevation effect.
 #'   This vector depends on the neighbourhood design and on the pixel scale.
 #'   If unchanged, it's always the same.
 #' @param double upper_limit: upper limit for spread probability (setting to
 #'   1 makes absurdly large fires).
-
+#' @param bool plot_animation: whether to plot the fire progress while running
+#'   or not (set to FALSE by default).
 simulate_fire_r <- function(
     landscape,
     burnable,
@@ -465,98 +464,3 @@ simulate_fire_deterministic_r <- function(
 
   return(burned_bin)
 }
-
-
-# Simmilarity/discrepancy functions ---------------------------------------
-
-compare_fires_r <- function(fire1, fire2, lscale = 0.2) {
-  
-  # Extract list elemnts ------------------------------------------------
-    
-  burned1 <- fire1[["burned_layer"]]
-  burned2 <- fire2[["burned_layer"]]
-    
-  burned_ids1 <- fire1[["burned_ids"]] + 1 # important to add 1 to use R indexing
-  burned_ids2 <- fire2[["burned_ids"]] + 1
-    
-  size1 <- ncol(burned_ids1)
-  size2 <- ncol(burned_ids2)
-    
-  counts1 <- fire1[["counts_veg"]]
-  counts2 <- fire2[["counts_veg"]]
-    
-  # overlap_sp -----------------------------------------------------------
-      
-  # compute common pixels only in the smaller fire
-  if(size1 < size2) {
-    bb <- numeric(size1)
-    for(i in 1:size1) {
-      bb[i] <- burned2[burned_ids1[1, i], burned_ids1[2, i]]
-    }
-  } else {
-    bb <- numeric(size2)
-    for(i in 1:size2) {
-      bb[i] <- burned1[burned_ids2[1, i], burned_ids2[2, i]]
-    }
-  }
-  
-  common <- sum(bb)    
-  overlap_sp <- common / (size1 + size2 - common)
-      
-  # overlap_vd -----------------------------------------------------------
-        
-  # Get vegetation distribution by fire (normalized burned areas)
-  veg_types <- length(counts1)
-      
-  burned_dist_1 <- numeric(veg_types)
-  burned_dist_2 <- numeric(veg_types)
-      
-  for(v in 1:veg_types) {
-    burned_dist_1[v] <- counts1[v] / sum(counts1)
-    burned_dist_2[v] <- counts2[v] / sum(counts2)
-  }
-      
-  # compute vegetation distribution overlap
-  overlap_vd <- sum(pmin(burned_dist_1, burned_dist_2))
-      
-  # deltas by veg_type ---------------------------------------------------
-  
-  # normalized difference using absolute difference. The difference by veg_type
-  # is in [0, 1]. So, if we divide delta_norm by veg_num, it will be in [0, 1].
-  sum_area <- counts1 + counts2
-  use <- sum_area > 0
-  
-  delta_norm <- sum(abs((counts1[use] - counts2[use]) / sum_area[use]))
-  
-  # Scale to [0, 1]
-  delta_norm_unit <- delta_norm / veg_types
-      
-  # Transform to similarities
-  overlap_norm <- 1.0 - delta_norm_unit
-  overlap_expquad <- exp(-delta_norm_unit ^ 2 / lscale) # 0.2 is the Gaussian SD.
-  overlap_quad <- 1 - delta_norm_unit ^ 2
-  
-  # ---------------------------------------------------------------------
-        
-  indexes <- c(
-    # pure indices
-    "overlap_sp"      = overlap_sp,
-    "overlap_vd"      = overlap_vd,
-    "overlap_norm"    = overlap_norm,
-    "overlap_expquad" = overlap_expquad,
-    "overlap_quad"    = overlap_quad,
-    
-    # mixture indices
-    "sp_norm_5050"    = 0.50 * overlap_sp + 0.50 * overlap_norm,
-    "sp_norm_7525"    = 0.75 * overlap_sp + 0.25 * overlap_norm,
-    "sp_expquad_5050" = 0.50 * overlap_sp + 0.50 * overlap_expquad,
-    "sp_expquad_7525" = 0.75 * overlap_sp + 0.25 * overlap_expquad,
-    "sp_quad_5050"    = 0.50 * overlap_sp + 0.50 * overlap_quad,
-    "sp_quad_7525"    = 0.75 * overlap_sp + 0.25 * overlap_quad
-  )
-      
-  return(indexes)
-}
-  
-
-

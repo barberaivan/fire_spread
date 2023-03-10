@@ -38,15 +38,15 @@ for(i in 1:length(fnames)) {
 
 # // Wind direction avg:
 # // 284.0693132595486°
-# 
+#
 # // Wind speed avg:
 # // 4.78628962675556 m/s
 
 # Note that the .tif files will be the elevation layer in elevation_dir,
 # while the others will be outputs from windninja.
 
-# Details for wind ninja: 
-# mesh resolution = 90 m, 
+# Details for wind ninja:
+# mesh resolution = 90 m,
 # result scale = 30 m,
 # speed unit = m/s,
 # speed input = 4.79 m/s,
@@ -58,7 +58,7 @@ for(i in 1:length(fnames)) {
 
 # import fire shapes to get year (for fwi matching)
 f <- vect(file.path(data_path, "patagonian_fires_spread.shp"))
-# _spread has the fires edited so every burned separate patch counts as a 
+# _spread has the fires edited so every burned separate patch counts as a
 # separate fire, no matter whether they correspond to the same event or not.
 
 # fwi image
@@ -73,7 +73,7 @@ n_fires <- length(fire_ids)
 raw_imgs <- vector(mode = "list", length = length(fnames))
 for(i in 1:length(fnames)) {
   raw_imgs[[i]] <- rast(file.path(gee_dir, fnames[i]))
-  id_raw <- strsplit(fnames[i], c("_|[.]"))[[1]] 
+  id_raw <- strsplit(fnames[i], c("_|[.]"))[[1]]
   remove <- c(1:3, length(id_raw))
   id <- paste(id_raw[-remove], collapse = c("_"))
   fire_ids[i] <- id
@@ -85,7 +85,7 @@ names(raw_imgs) <- fire_ids
 wind_files_raw <- list.files(windninja_dir)
 wind_files <- wind_files_raw[grep("_ang.asc", wind_files_raw)]
 wind_ids <- sapply(wind_files, function(x) {
-  id_raw <- strsplit(x, c("_|[.]"))[[1]] 
+  id_raw <- strsplit(x, c("_|[.]"))[[1]]
   remove <- length(id_raw) : (length(id_raw) - 4)
   id <- paste(id_raw[-remove], collapse = c("_"))
   return(id)
@@ -117,7 +117,7 @@ for(i in 1:length(wind_imgs)) {
 # get years
 fyears <- sapply(fire_ids, function(x) {
   f$year[f$fire_id == x]
-}) 
+})
 
 # list with landscapes
 lands <- vector(mode = "list", length = n_fires)
@@ -126,46 +126,46 @@ names(lands) <- fire_ids
 for(i in 1:n_fires) {
   print(i)
   # i = 1
-    
+
   # every fire will be a list
-  elem_names <- c("landscape", "ig_rowcol", 
+  elem_names <- c("landscape", "ig_rowcol",
                   "burned_layer", "burned_ids", "counts_veg")
-  # landscape and ig_rowcol are used to simulate the fire, while the remaining 
+  # landscape and ig_rowcol are used to simulate the fire, while the remaining
   # elements are used to compare with simulated ones (these are the same outputs
   # from the fire simulation function).
-  
+
   lands[[i]] <- vector(mode = "list", length = 5)
   names(lands[[i]]) <- elem_names
 
   # get raw image values
   v <- values(raw_imgs[[i]])
-  
+
   # vegetation
   veg_codes <- v[, "veg"]
   # replace nan with 1 (non burnable)
   veg_codes[is.nan(veg_codes)] <- 1
-  
+
   # make veg matrix
   veg_mat <- matrix(0, length(veg_codes), 3) # 3 cols for wet, subalpine, and dry forests
   # shrubland is the reference
   colnames(veg_mat) <- c("subalpine", "wet", "dry")
-  
+
   veg_mat[veg_codes == 2, 1] <- 1 # subalpine
   veg_mat[veg_codes == 3, 2] <- 1 # wet
   veg_mat[veg_codes == 4, 3] <- 1 # dry
-  
+
   # get fwi
-  fwi_local <- project(fwi[[as.character(fyears[i])]], 
+  fwi_local <- project(fwi[[as.character(fyears[i])]],
                        raw_imgs[[i]],
                        method = "cubicspline")
   names(fwi_local) <- "fwi"
-  
+
   # project wind direction to match extent
   wind_local <- project(wind_imgs[[i]],
                         raw_imgs[[i]],
                         method = "cubicspline")
   names(wind_local) <- "wind"
-  
+
   # get landscape in matrix form
   land_long <- cbind(
     veg_mat,
@@ -178,34 +178,34 @@ for(i in 1:n_fires) {
   )
   # Order matters. Wind and elevation must be the last data-layers,
   # with burnable and burned in the end.
-  
+
   # get landscape in array form
   land_arr <- array(
-    NA, 
-    dim = c(nrow(raw_imgs[[i]]), 
+    NA,
+    dim = c(nrow(raw_imgs[[i]]),
             ncol(raw_imgs[[i]]),
             ncol(land_long)),
-    dimnames = list(rows = NULL, cols = NULL, 
+    dimnames = list(rows = NULL, cols = NULL,
                     layers = colnames(land_long))
   )
-  
-  for(j in 1:ncol(land_long)) { 
-    land_arr[, , j] <- matrix(land_long[, j], 
+
+  for(j in 1:ncol(land_long)) {
+    land_arr[, , j] <- matrix(land_long[, j],
                               nrow = nrow(land_arr),
                               ncol = ncol(land_arr),
                               byrow = TRUE)
   } # terra gives raster values by row
-  
+
   # Fill landscape and burned_layer
   lands[[i]]$landscape <- land_arr[, , 1:(ncol(land_long) - 1)] # without burned layer
   lands[[i]]$burned_layer <- land_arr[, , ncol(land_long)]
-  
+
   # compute burned_ids (with 0-indexing!)
   burned_cells <- which(v[, "burned"] == 1)
   # length(burned_cells) == sum(v[, "burned"])
   burned_rowcols <- rowColFromCell(raw_imgs[[i]], burned_cells)
   lands[[i]]$burned_ids <- t(burned_rowcols) - 1 # for 0-indexing!
-  
+
   # burned pixels by vegetation type
   counts_veg <- numeric(4)
   for(k in 2:4) counts_veg[k] <- sum(veg_mat[, (k-1)] * v[, "burned"]) # non-shrubland
@@ -227,20 +227,20 @@ points <- project(points_raw, raw_imgs[[1]])
 
 for(i in 1:n_fires) {
   # i = 1
-  
+
   # subset ignition points
   p_local <- points[points$Name == fire_ids[i]]
-  
+
   # get coordinates and row_col
   cc <- crds(p_local)
   ig_rowcol <- rbind(rowFromY(raw_imgs[[i]], cc[, "y"]),
                      colFromX(raw_imgs[[i]], cc[, "x"]))
   row.names(ig_rowcol) <- c("row", "col")
-  
+
   if(anyNA(ig_rowcol)) {
     stop(paste("Ignition point out of range,", "fire_id", fire_ids[i]))
   }
-  
+
   lands[[i]]$ig_rowcol <- ig_rowcol - 1 # 0-indexing!!!
 }
 
@@ -250,14 +250,14 @@ ccc <- numeric(n_fires)
 for(i in 1:n_fires) {
   # i = 45
   ig <- lands[[i]]$ig_rowcol + 1 # because of 0-indexing
-  
+
   point_checks <- sapply(1:ncol(ig), function(c) {
     cbind(lands[[i]]$landscape[ig[1, c], ig[2, c], "burnable"],
           lands[[i]]$burned_layer[ig[1, c], ig[2, c]])
   }) %>% colSums %>% unique()
-  
+
   ccc[i] <- point_checks
-  
+
   if(point_checks != 2) {
     stop(paste("Ignition point problems,", "fire_id:", fire_ids[i], "i:", i))
   }

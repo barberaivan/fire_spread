@@ -1,6 +1,7 @@
 library(testthat)
 
 library(Rcpp)
+library(terra)
 
 
 sourceCpp("spread_functions.cpp")
