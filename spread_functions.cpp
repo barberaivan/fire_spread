@@ -231,9 +231,12 @@ struct burned simulate_fire_internal(
       // Get burning_cells' data
       arma::vec data_burning = landscape.tube(burned_ids(0, b), burned_ids(1, b));
 
+      int neighbours[2][8];
       // get neighbours (adjacent computation here)
-      IntegerMatrix neighbours(2, 8);
-      for(int i = 0; i < 8; i++) neighbours(_, i) = burned_ids(_, b) + moves(_, i);
+      for(int i = 0; i < 8; i++) {
+        neighbours[0][i] = burned_ids(0, b) + moves(0, i);
+        neighbours[1][i] = burned_ids(1, b) + moves(1, i);
+      }
 
       // Loop over neighbours of the focal burning cell
 
@@ -241,19 +244,19 @@ struct burned simulate_fire_internal(
 
         // Is the cell in range?
         bool out_of_range = (
-          (neighbours(0, n) < 0) | (neighbours(0, n) >= n_row) | // check rows
-          (neighbours(1, n) < 0) | (neighbours(1, n) >= n_col)   // check cols
+          (neighbours[0][n] < 0) | (neighbours[0][n] >= n_row) | // check rows
+          (neighbours[1][n] < 0) | (neighbours[1][n] >= n_col)   // check cols
         );
         if(out_of_range) continue;
 
         // Is the cell burnable?
-        bool burnable_cell = (burned_bin(neighbours(0, n), neighbours(1, n)) == 0) &
-                             (burnable(neighbours(0, n), neighbours(1, n)) == 1);
+        bool burnable_cell = (burned_bin(neighbours[0][n], neighbours[1][n]) == 0) &
+                             (burnable(neighbours[0][n], neighbours[1][n]) == 1);
 
         if(!burnable_cell) continue;
 
         // obtain data from the neighbour
-        arma::vec data_neighbour = landscape.tube(neighbours(0, n), neighbours(1, n));
+        arma::vec data_neighbour = landscape.tube(neighbours[0][n], neighbours[1][n]);
 
         // simulate fire
         double prob = spread_onepix_prob_cpp(
@@ -276,9 +279,9 @@ struct burned simulate_fire_internal(
         // set 1 in burned_bin
         // (but advance end_forward first)
         end_forward += 1;
-        burned_ids(0, end_forward) = neighbours(0, n);
-        burned_ids(1, end_forward) = neighbours(1, n);
-        burned_bin(neighbours(0, n), neighbours(1, n)) = 1;
+        burned_ids(0, end_forward) = neighbours[0][n];
+        burned_ids(1, end_forward) = neighbours[1][n];
+        burned_bin(neighbours[0][n], neighbours[1][n]) = 1;
 
       } // end loop over neighbours of burning cell b
 
