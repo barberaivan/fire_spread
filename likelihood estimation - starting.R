@@ -31,7 +31,7 @@ m3 <- sobol(n = 1000, dim = d, init = F)
 # points(m2[, 1], m2[, 2], col = "red")
 # points(m3[, 1], m3[, 2], col = "blue")
 
-# If the first sample (m1) is initialized, all the following will always be the
+# If the first sample (m1) is initialized, all the following will always be the 
 # same. i.e., the sequence is fixed. init = F is needed so the following sequences
 # are not the same as the first.
 
@@ -44,46 +44,41 @@ prior_sim <- function(mu_int = 0, sd_int = 20, r_01 = 0.05, r_z = 0.15) { # wide
     "subalpine" = rnorm(1, 0, sd_int),        # veg coefficients
     "wet" = rnorm(1, 0, sd_int),
     "dry" = rnorm(1, 0, sd_int),
-    "fwi" = rexp(1, r_z),                     # positive
+    "fwi" = rexp(1, r_z),                     # positive 
     "aspect" = rexp(1, r_01),                 # positive (northing)
     "wind" = rexp(1, r_01),                   # positive
     "elevation" = (-1) * rexp(1, r_z),        # negative
     "slope" = rexp(1, r_01)                   # positive
   )
-
+  
   return(betas)
 }
 
 prior_sim()
 
-# function to compute prior quantiles from the percentiles, which will be
+# function to compute prior quantiles from the percentiles, which will be 
 # obtained as sobols sequences in [0, 1] ^ d
 prior_q <- function(p, mu_int = 0, sd_int = 20, r_01 = 0.05, r_z = 0.15) {
   q <- matrix(NA, nrow(p), ncol(p))
   colnames(q) <- c("intercept", "subalpine", "wet", "dry",
                    "fwi", "aspect", "wind", "elevation", "slope")
-
+  
   q[, 1] <- qnorm(p[, 1], mean = mu_int, sd = sd_int)
-<<<<<<< Updated upstream
-
-  for(i in 2:4) {
-=======
   
   for (i in 2:4) {
->>>>>>> Stashed changes
     q[, i] <- qnorm(p[, i], mean = 0, sd = sd_int)
   }
-
+  
   names_01 <- which(colnames(q) %in% c("aspect", "wind", "slope"))
   for(i in names_01) { # [0, 1] predictors
     q[, i] <- qexp(p[, i], rate = r_01)
   }
-
+  
   names_z <- which(colnames(q) %in% c("fwi", "elevation"))
   for(i in names_z) { # standardized predictors
     q[, i] <- qexp(p[, i], rate = r_z)
   }
-
+  
   return(q)
 }
 
@@ -149,35 +144,11 @@ w0 <- prior_q(p)
 
 fire_data <- readRDS(file.path("..", "fire_spread_data", "landscapes_ig-known_non-steppe.rds"))
 
-<<<<<<< Updated upstream
-mod <- gam(y ~ s(intercept, k = 6, bs = "gp") +
-               s(subalpine, k = 6, bs = "gp") +
-               s(wet, k = 6, bs = "gp") +
-               s(dry, k = 6, bs = "gp") +
-               s(fwi, k = 6, bs = "gp") +
-               s(aspect, k = 6, bs = "gp") +
-               s(wind, k = 6, bs = "gp") +
-               s(elevation, k = 6, bs = "gp") +
-               s(slope, k = 6, bs = "gp"),
-           data = data, method = "REML")
-=======
->>>>>>> Stashed changes
 
 # Computing likelihood for the real data set ------------------------------
 
-<<<<<<< Updated upstream
-# It's easier to use a GP directly. We need one that can fit a nugget term, to
-# take into account unexplained variability.
-# In addition, raw results could be used to account for heteroscedasticity and
-# model it. However, that would be more complex.
-# Try a first wave and compare the results between 2 gp:
-#   including or not a quadratic term for the mean.
-# Perhaps the best package by now is GauPro. GPfit is only for deterministic
-# simulators. (it would be useful to parameterize FARSITE!)
-=======
 n_fires <- length(fire_data)
 fire_names <- names(fire_data)
->>>>>>> Stashed changes
 
 wind_lay <- which(dimnames(fire_data[[1]]$landscape)$layers == "wind") - 1
 elev_lay <- which(dimnames(fire_data[[1]]$landscape)$layers == "elev") - 1
@@ -243,13 +214,6 @@ part <- c(1000, rep(0, 8)) # terrible coefficients (the worst)
 
 # Parallelization test ----------------------------------------------------
 
-<<<<<<< Updated upstream
-ggplot(table_plot, aes(x = intercept, y = y)) +
-  geom_point()
-
-ggplot(table_plot, aes(x = intercept, y = y_hat)) +
-  geom_point()
-=======
 # function to loop across particles
 loglik_fire_particle <- function(fire, particle) {
     
@@ -273,7 +237,6 @@ loglik_fire_particle <- function(fire, particle) {
 
 part <- c(1000, rep(0, 8)) # terrible coefficients (the worst)
 loglik_fire_particle(fire_data[[1]], part)
->>>>>>> Stashed changes
 
 # make particles
 n = 20; d = 9
@@ -369,15 +332,9 @@ l200 <- list_mat(w200)
 #   scheduled cores 12, 15 did not deliver results, all values of the jobs will be 
 # affected
 
-<<<<<<< Updated upstream
-d0$y <- rnorm(nrow(w0),
-              (10) * d0$intercept + (-10) * d0$intercept ^ 2,
-              sd = 1)
-=======
 # más o menos 15 / 100 resultados fueron NULL. Lo bueno es que uno puede saber en 
 # cuáles hubo problemas y volver a evaluar esas partículas.
 # esos 15 null, si conté bien, coinciden con "15 did not deliver results".
->>>>>>> Stashed changes
 
 # Por lo que leí, parece que pasa con RAM issues. 
 
@@ -440,19 +397,10 @@ p <- sobol(npar, d)
 w0 <- prior_q(p)
 w0_list <- list_mat(w0)
 
-<<<<<<< Updated upstream
-colnames(p) <- colnames(w0)
-d0 <- as.data.frame(p)
-d0$y <- rnorm(nrow(d0),
-              (10) * d0$intercept + (-10) * d0$intercept ^ 2,
-              sd = 1)
-d0$noise <- exp((-3) * d0$intercept + (3) * d0$intercept ^ 2)
-=======
 bench_16cores <- microbenchmark(
   "a" = {pruebita <- loglik_eval_par(fire_data[["2015_53"]], w0_list)},
   times = 1
 ); bench_16cores
->>>>>>> Stashed changes
 
 
 # Timings para simular fuegos en paisajes cualquiera.
