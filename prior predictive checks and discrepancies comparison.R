@@ -44,7 +44,7 @@ upper_limit <- 0.5
 # Logistic curves for standardized variables ------------------------------
 
 sd_z <- 5
-r_z <- 0.25
+r_z <- 0.15
 
 par(mfrow = c(1, 2))
 #normal
@@ -90,7 +90,7 @@ curve(dlnorm(x, log(coef(mm)), sigma(mm)), col = 4, add = TRUE) # feo feo el fit
 # Logistic curves for [-1, 1] variables ---------------------------------
 
 sd_01 <- 10
-r_01 <- 0.15
+r_01 <- 0.05
 
 par(mfrow = c(1, 2))
 
@@ -122,7 +122,7 @@ par(mfrow = c(1, 1))
 
 
 # densities
-curve(dnorm(x, 0, sd_01) * 2, from = 0, to = 20,
+curve(dnorm(x, 0, sd_01) * 2, from = 0, to = 20, 
       ylim = c(0, 0.18))
 curve(dexp(x, r_01), col = 2, add = TRUE)
 
@@ -130,13 +130,13 @@ curve(dexp(x, r_01), col = 2, add = TRUE)
 
 # Intercept distribution --------------------------------------------------
 
-sd_int <- 2
-mu_int <- logit(0.2 / upper_limit)
+sd_int <- 20
+mu_int <- 0#logit(0.2 / upper_limit)
 curve(dlogitnorm(x, mu_int, sd_int), n = 1000)
 
 # Function to simulate from the prior -------------------------------------
 
-prior_sim <- function(mu_int = 0, sd_int = 2, r_01 = 0.1, r_z = 0.25) {
+prior_sim <- function(mu_int = 0, sd_int = 20, r_01 = 0.05, r_z = 0.15) {
   betas <- c(
     "intercept" = rnorm(1, mu_int, sd_int),   # shrubland logit (reference class)
     "subalpine" = rnorm(1, 0, sd_int),        # veg coefficients
