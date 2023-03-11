@@ -21,9 +21,9 @@ using namespace Rcpp;
 // Constants ---------------------------------------------------------------
 
 // Elevation data to standardize predictor
-double elevation_mean = 1163.3;
-double elevation_sd = 399.5;
-int moves[8][2] = {
+const double elevation_mean = 1163.3;
+const double elevation_sd = 399.5;
+const int moves[8][2] = {
   {-1, -1},
   {-1,  0},
   {-1,  1},
@@ -55,7 +55,7 @@ int moves[8][2] = {
 // the direction from which the wind comes, these angles must represent where the
 // fire would come from if from the neighbours we look at the central pixel.
 
-double angles[8] = {
+const double angles[8] = {
   M_PI * 3 / 4, M_PI, M_PI * 5 / 4,
       M_PI / 2,       M_PI * 3 / 2,
       M_PI / 4,    0, M_PI * 7 / 4
