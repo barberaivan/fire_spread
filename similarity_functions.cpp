@@ -4,50 +4,39 @@ using namespace Rcpp;
 
 #include <spread_functions.cpp>
 
-//' @title compare_fires_try
-//' @description Function compare two fires using many similarity
-//'   indexes, to try them as proxies for the likelihood, when simulated fires
-//'   are compared to the observed one. "_try" because it computes many
-//'   similarity indexes; after selecting one we will have a function to compute
-//'   only the best one.
-//' @return NumericVector(n_metrics): vector with the comparison indexes.
+struct compare_result {
+  double overlap_sp;
 
-//' @param List fire1, List fire2: data from the fires to compare. This has the
-//'   same elements as the result from simulate_fire_compare:
-//'     IntegerMatrix burned_layer: binary matrix storing (1) in burned pixels;
-//'     IntegerMatrix burned_ids: id in [row, col] (0-indexing) of the burned
-//'       cells. First row holds the rows, second row holds the columns, and
-//'       each column is a burned pixel;
-//'     IntegerVector counts_veg: count of burned pixels by vegetation type.
-//'   The burned_layer is used to compute the spatial overlap index; the
-//'   burned_ids is used to evaluate the common burned pixels, looping only in
-//'   the burned_ids from the smaller fire; counts_veg is used to compute the
-//'   difference in number of pixels burned by vegetation type.
-//' @param double lscale: length-scale parameter for the gaussian kernel
-//'   (the sd in a Normal distribution). Used to turn a dissimilarity into
-//'   a similarity.
+  double overlap_vd;
+  double overlap_norm;
+  double overlap_expquad;
+  double overlap_quad;
 
-//' Details: the discrepancy index computed in Morales et al. 2015 paper is not
-//' considered here because it has a wayward behaviour. Different denominators
-//' are used, which work better.
+  double sp_norm_5050;
+  double sp_norm_7525;
+  double sp_expquad_5050;
+  double sp_expquad_7525;
+  double sp_quad_5050;
+  double sp_quad_7525;
+};
 
-// [[Rcpp::export]]
-NumericVector compare_fires_try(List fire1, List fire2,
-                                double lscale = 0.2) {
+struct compare_result compare_fires_try_cpp(
+    struct burned_compare fire1, struct burned_compare fire2,
+    double lscale = 0.2) {
 
   // Extract list elements ------------------------------------------------
 
-  NumericMatrix burned1 = fire1["burned_layer"];
-  NumericMatrix burned2 = fire2["burned_layer"];
+  IntegerMatrix burned1 = fire1.burned_layer;
+  IntegerMatrix burned2 = fire2.burned_layer;
 
-  IntegerMatrix burned_ids1 = fire1["burned_ids"];
-  IntegerMatrix burned_ids2 = fire2["burned_ids"];
+  IntegerMatrix burned_ids1 = fire1.burned_ids;
+  IntegerMatrix burned_ids2 = fire2.burned_ids;
 
   double size1 = burned_ids1.ncol();
   double size2 = burned_ids2.ncol();
 
-  NumericVector counts1 = fire1["counts_veg"];
-  NumericVector counts2 = fire2["counts_veg"];
+  NumericVector counts1 = fire1.counts_veg;
+  NumericVector counts2 = fire2.counts_veg;
 
   // overlap_sp -----------------------------------------------------------
 
@@ -110,25 +99,91 @@ NumericVector compare_fires_try(List fire1, List fire2,
 
   // ---------------------------------------------------------------------
 
-  NumericVector indexes = NumericVector::create(
+  struct compare_result indexes = {
     // pure indices
-    Named("overlap_sp")      = overlap_sp,
+    .overlap_sp      = overlap_sp,
 
-    Named("overlap_vd")      = overlap_vd,
-    Named("overlap_norm")    = overlap_norm,
-    Named("overlap_expquad") = overlap_expquad,
-    Named("overlap_quad")    = overlap_quad,
+    .overlap_vd      = overlap_vd,
+    .overlap_norm    = overlap_norm,
+    .overlap_expquad = overlap_expquad,
+    .overlap_quad    = overlap_quad,
 
     // mixture indices
-    Named("sp_norm_5050")    = 0.50 * overlap_sp + 0.50 * overlap_norm,
-    Named("sp_norm_7525")    = 0.75 * overlap_sp + 0.25 * overlap_norm,
-    Named("sp_expquad_5050") = 0.50 * overlap_sp + 0.50 * overlap_expquad,
-    Named("sp_expquad_7525") = 0.75 * overlap_sp + 0.25 * overlap_expquad,
-    Named("sp_quad_5050")    = 0.50 * overlap_sp + 0.50 * overlap_quad,
-    Named("sp_quad_7525")    = 0.75 * overlap_sp + 0.25 * overlap_quad
-  );
+    .sp_norm_5050    = (0.50 * overlap_sp + 0.50 * overlap_norm),
+    .sp_norm_7525    = (0.75 * overlap_sp + 0.25 * overlap_norm),
+    .sp_expquad_5050 = (0.50 * overlap_sp + 0.50 * overlap_expquad),
+    .sp_expquad_7525 = (0.75 * overlap_sp + 0.25 * overlap_expquad),
+    .sp_quad_5050    = (0.50 * overlap_sp + 0.50 * overlap_quad),
+    .sp_quad_7525    = (0.75 * overlap_sp + 0.25 * overlap_quad)
+  };
 
   return indexes;
+}
+
+//' @title compare_fires_try
+//' @description Function compare two fires using many similarity
+//'   indexes, to try them as proxies for the likelihood, when simulated fires
+//'   are compared to the observed one. "_try" because it computes many
+//'   similarity indexes; after selecting one we will have a function to compute
+//'   only the best one.
+//' @return NumericVector(n_metrics): vector with the comparison indexes.
+
+//' @param List fire1, List fire2: data from the fires to compare. This has the
+//'   same elements as the result from simulate_fire_compare:
+//'     IntegerMatrix burned_layer: binary matrix storing (1) in burned pixels;
+//'     IntegerMatrix burned_ids: id in [row, col] (0-indexing) of the burned
+//'       cells. First row holds the rows, second row holds the columns, and
+//'       each column is a burned pixel;
+//'     IntegerVector counts_veg: count of burned pixels by vegetation type.
+//'   The burned_layer is used to compute the spatial overlap index; the
+//'   burned_ids is used to evaluate the common burned pixels, looping only in
+//'   the burned_ids from the smaller fire; counts_veg is used to compute the
+//'   difference in number of pixels burned by vegetation type.
+//' @param double lscale: length-scale parameter for the gaussian kernel
+//'   (the sd in a Normal distribution). Used to turn a dissimilarity into
+//'   a similarity.
+
+//' Details: the discrepancy index computed in Morales et al. 2015 paper is not
+//' considered here because it has a wayward behaviour. Different denominators
+//' are used, which work better.
+
+// [[Rcpp::export]]
+NumericVector compare_fires_try(List fire1, List fire2,
+                                double lscale = 0.2) {
+
+  // Extract list elements ------------------------------------------------
+
+  IntegerMatrix burned1 = fire1["burned_layer"];
+  IntegerMatrix burned2 = fire2["burned_layer"];
+
+  IntegerMatrix burned_ids1 = fire1["burned_ids"];
+  IntegerMatrix burned_ids2 = fire2["burned_ids"];
+
+  NumericVector counts1 = fire1["counts_veg"];
+  NumericVector counts2 = fire2["counts_veg"];
+
+  struct compare_result indexes = compare_fires_try_cpp(
+    {burned1, burned_ids1, counts1},
+    {burned2, burned_ids2, counts2}
+  );
+
+  return NumericVector::create(
+    // pure indices
+    Named("overlap_sp")      = indexes.overlap_sp,
+
+    Named("overlap_vd")      = indexes.overlap_vd,
+    Named("overlap_norm")    = indexes.overlap_norm,
+    Named("overlap_expquad") = indexes.overlap_expquad,
+    Named("overlap_quad")    = indexes.overlap_quad,
+
+    // mixture indices
+    Named("sp_norm_5050")    = indexes.sp_norm_5050,
+    Named("sp_norm_7525")    = indexes.sp_norm_7525,
+    Named("sp_expquad_5050") = indexes.sp_expquad_5050,
+    Named("sp_expquad_7525") = indexes.sp_expquad_7525,
+    Named("sp_quad_5050")    = indexes.sp_quad_5050,
+    Named("sp_quad_7525")    = indexes.sp_quad_7525
+  );
 }
 
 // Emulate likelihood function --------------------------------------------
