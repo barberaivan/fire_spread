@@ -23,13 +23,17 @@ using namespace Rcpp;
 // Elevation data to standardize predictor
 double elevation_mean = 1163.3;
 double elevation_sd = 399.5;
+int moves[8][2] = {
+  {-1, -1},
+  {-1,  0},
+  {-1,  1},
+  { 0, -1},
+  { 0,  1},
+  { 1, -1},
+  { 1,  0},
+  { 1,  1}
+};
 
-// Moves matrix to find neighbours (queen directions) of a pixel, used in
-// adjacent_ functions.
-IntegerVector moves_long = {-1,-1,-1,  0,0,  1,1,1,  // rows
-                            -1, 0, 1, -1,1, -1,0,1}; // cols
-IntegerMatrix moves_t(8, 2, moves_long.begin());
-IntegerMatrix moves = transpose(moves_t);
 /* In the case
  * of a 8-pixels neighbourhood, it's a matrix with 2 rows (row and column
  * values) and 8 columns. Its values are {-1, 0, 1}, so that when adding up
@@ -234,9 +238,10 @@ struct burned simulate_fire_internal(
       int neighbours[2][8];
       // get neighbours (adjacent computation here)
       for(int i = 0; i < 8; i++) {
-        neighbours[0][i] = burned_ids(0, b) + moves(0, i);
-        neighbours[1][i] = burned_ids(1, b) + moves(1, i);
+        neighbours[0][i] = burned_ids(0, b) + moves[i][0];
+        neighbours[1][i] = burned_ids(1, b) + moves[i][1];
       }
+
 
       // Loop over neighbours of the focal burning cell
 
