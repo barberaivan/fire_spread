@@ -1,6 +1,8 @@
 #include <RcppArmadillo.h>
 // [[Rcpp::depends(RcppArmadillo)]]
 
+#include <vector>
+
 // armadillo used for the matrix representation of the rasters, to use the
 // cube data type.
 
@@ -69,7 +71,7 @@ const double angles[8] = {
 //'
 //' @param arma::vec data_burning: environmental data from burning cell.
 //' @param arma::vec data_neighbour: environmental data from target neighbour.
-//' @param NumericVector coef: parameters in logistic regression to compute the
+//' @param arma::vec coef: parameters in logistic regression to compute the
 //'   spread probability as a function of covariates. It has one more elements
 //'   than the columns of data_ because it includes the intercept.
 //' @param int position: relative position of the neighbour in relation to the
@@ -93,7 +95,7 @@ const double angles[8] = {
 // [[Rcpp::export]]
 double spread_onepix_prob_cpp(arma::vec data_burning,
                            arma::vec data_neighbour,
-                           NumericVector coef,
+                           arma::vec coef,
                            int position,
                            int wind_column,
                            int elev_column,
@@ -114,11 +116,11 @@ double spread_onepix_prob_cpp(arma::vec data_burning,
   double elev_term = (data_neighbour(elev_column) - elevation_mean) / elevation_sd;
 
   // compute probability
-  double linpred = coef(0); // linear predictor, initialize as intercept.
+  double linpred = coef[0]; // linear predictor, initialize as intercept.
   // (the design matrix lacks the intercept column.)
   // All the effects besides elevation, slope and slope:
   for(int k = 0; k < (data_neighbour.size() - 2); k++) {
-    linpred += coef(k+1) * data_neighbour(k);
+    linpred += coef[k+1] * data_neighbour(k);
   }
 
   // (coef is lagged ahead wrt the data_neighbours because it has the intercept,
@@ -140,7 +142,7 @@ double spread_onepix_prob_cpp(arma::vec data_burning,
 // [[Rcpp::export]]
 int spread_onepix_cpp(arma::vec data_burning,
                       arma::vec data_neighbour,
-                      NumericVector coef,
+                      arma::vec coef,
                       int position,
                       int wind_column,
                       int elev_column,
@@ -176,10 +178,10 @@ struct burned simulate_fire_internal(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
-    NumericVector coef,
+    arma::vec coef,
     int wind_layer,
     int elev_layer,
-    NumericVector distances,
+    arma::vec distances,
     double upper_limit = 1.0,
     double (*prob_fn)(double, double) = R::rbinom) {
 
@@ -271,7 +273,7 @@ struct burned simulate_fire_internal(
           n,           // pixel position identifier (for wind and slope effects)
           wind_layer,
           elev_layer,
-          distances(n),
+          distances[n],
           upper_limit
         );
 
@@ -320,12 +322,12 @@ struct burned simulate_fire_internal(
 //'   the col_id.
 //' @param IntegerMatrix burnable: matrix indicating if each pixel is burnable (1)
 //'   or not (0).
-//' @param NumericVector coef: parameters in logistic regression to compute the
+//' @param arma::vec coef: parameters in logistic regression to compute the
 //'   spread probability as a function of covariates.
 //' @param int wind_layer: layer in the data (landscape) with wind matrix.
 //' @param int elev_layer: layer in the data (landscape) with elevation matrix.
 //'   Wind and elevation layers must be the last 2.
-//' @param NumericVector distances: distances (m) between burning and target cells,
+//' @param arma::vec distances: distances (m) between burning and target cells,
 //'   in the same order as positions. Used to compute the elevation effect.
 //'   This vector depends on the neighbourhood design and on the pixel scale.
 //'   If unchanged, it's always the same.
@@ -337,10 +339,10 @@ IntegerMatrix simulate_fire_cpp(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
-    NumericVector coef,
+    arma::vec coef,
     int wind_layer,
     int elev_layer,
-    NumericVector distances,
+    arma::vec distances,
     double upper_limit) {
 
   return simulate_fire_internal(
@@ -366,10 +368,10 @@ IntegerMatrix simulate_fire_deterministic_cpp(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
-    NumericVector coef,
+    arma::vec coef,
     int wind_layer,
     int elev_layer,
-    NumericVector distances,
+    arma::vec distances,
     double upper_limit) {
   return simulate_fire_internal(
     landscape,
@@ -397,10 +399,10 @@ List simulate_fire_compare(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
-    NumericVector coef,
+    arma::vec coef,
     int wind_layer,
     int elev_layer,
-    NumericVector distances,
+    arma::vec distances,
     double upper_limit) {
 
 
