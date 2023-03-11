@@ -54,12 +54,12 @@ int moves[8][2] = {
 // Angles between cells to compute wind effect. As the wind direction is
 // the direction from which the wind comes, these angles must represent where the
 // fire would come from if from the neighbours we look at the central pixel.
-NumericVector angles_raw = {
-  135, 180, 225,
-  90,       270,
-  45,   0,  315
+
+double angles[8] = {
+  M_PI * 3 / 4, M_PI, M_PI * 5 / 4,
+      M_PI / 2,       M_PI * 3 / 2,
+      M_PI / 4,    0, M_PI * 7 / 4
 };
-NumericVector angles = angles_raw * M_PI / 180; // in radians!
 
 // --------------------------------------------------------------------------
 
@@ -108,7 +108,7 @@ double spread_onepix_prob_cpp(arma::vec data_burning,
   ));
 
   // wind term
-  double wind_term = cos(angles(position) - data_burning(wind_column));
+  double wind_term = cos(angles[position] - data_burning(wind_column));
 
   // elevation term (standardize predictor)
   double elev_term = (data_neighbour(elev_column) - elevation_mean) / elevation_sd;
