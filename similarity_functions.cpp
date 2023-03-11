@@ -153,12 +153,12 @@ NumericVector compare_fires_try(List fire1, List fire2,
 //'   the col_id.
 //' @param IntegerMatrix burnable: matrix indicating if each pixel is burnable (1)
 //'   or not (0).
-//' @param NumericVector coef: parameters in logistic regression to compute the
+//' @param arma::rowvec coef: parameters in logistic regression to compute the
 //'   spread probability as a function of covariates.
 //' @param int wind_layer: layer in the data (landscape) with wind matrix.
 //' @param int elev_layer: layer in the data (landscape) with elevation matrix.
 //'   Wind and elevation layers must be the last 2.
-//' @param NumericVector distances: distances (m) between burning and target cells,
+//' @param arma::rowvec distances: distances (m) between burning and target cells,
 //'   in the same order as positions. Used to compute the elevation effect.
 //'   This vector depends on the neighbourhood design and on the pixel scale.
 //' @param double upper_limit: upper limit for spread probability (setting to
@@ -181,10 +181,10 @@ NumericMatrix emulate_loglik_try(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
-    NumericVector coef,
+    arma::rowvec coef,
     int wind_layer,
     int elev_layer,
-    NumericVector distances,
+    arma::rowvec distances,
     double upper_limit,
     List fire_ref,
     int n_replicates = 10
