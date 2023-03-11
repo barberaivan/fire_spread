@@ -165,16 +165,16 @@ int spread_onepix_cpp(arma::rowvec data_burning,
 
 // -----------------------------------------------------------------------
 
-struct burned {
+typedef struct _s_burned_res {
   IntegerMatrix burned_bin;
   IntegerMatrix burned_ids;
   int end;
-};
+} burned_res;
 
 // function to simulate a fire spread given the landscape,
 // model coefficients and ignition points.
 
-struct burned simulate_fire_internal(
+burned_res simulate_fire_internal(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
@@ -388,11 +388,11 @@ IntegerMatrix simulate_fire_deterministic_cpp(
 
 // -------------------------------------------------------------------------
 
-struct burned_compare {
+typedef struct _s_burned_compare {
   IntegerMatrix burned_layer;
   IntegerMatrix burned_ids;
   NumericVector counts_veg;
-};
+} burned_compare;
 
 // same as simulate_fire, but returning many things to compute discrepancy
 // or similarity metrics:
@@ -400,7 +400,7 @@ struct burned_compare {
 // burned_ids,
 // size by veg_type
 
-struct burned_compare simulate_fire_compare_cpp(
+burned_compare simulate_fire_compare_cpp(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
@@ -411,7 +411,7 @@ struct burned_compare simulate_fire_compare_cpp(
     double upper_limit) {
 
 
-  struct burned burned_bin_ids = simulate_fire_internal(
+  burned_res burned_bin_ids = simulate_fire_internal(
     landscape,
     ignition_cells,
     burnable,
@@ -453,7 +453,7 @@ List simulate_fire_compare(
     double upper_limit) {
 
 
-  struct burned_compare burned_com = simulate_fire_compare_cpp(
+  burned_compare burned_com = simulate_fire_compare_cpp(
     landscape,
     ignition_cells,
     burnable,
