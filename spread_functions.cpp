@@ -388,14 +388,19 @@ IntegerMatrix simulate_fire_deterministic_cpp(
 
 // -------------------------------------------------------------------------
 
+struct burned_compare {
+  IntegerMatrix burned_layer;
+  IntegerMatrix burned_ids;
+  NumericVector counts_veg;
+};
+
 // same as simulate_fire, but returning many things to compute discrepancy
 // or similarity metrics:
 // burned_bin layer,
 // burned_ids,
 // size by veg_type
 
-// [[Rcpp::export]]
-List simulate_fire_compare(
+struct burned_compare simulate_fire_compare_cpp(
     arma::cube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
@@ -433,10 +438,36 @@ List simulate_fire_compare(
   // fill shrubland
   counts_veg(0) = (end + 1) - sum(counts_veg[seq(1, 3)]);
 
+  return {burned_bin, burned_ids(_, seq(0, end)), counts_veg};
+}
+
+// [[Rcpp::export]]
+List simulate_fire_compare(
+    arma::cube landscape,
+    IntegerMatrix ignition_cells,
+    IntegerMatrix burnable,
+    arma::rowvec coef,
+    int wind_layer,
+    int elev_layer,
+    arma::rowvec distances,
+    double upper_limit) {
+
+
+  struct burned_compare burned_com = simulate_fire_compare_cpp(
+    landscape,
+    ignition_cells,
+    burnable,
+    coef,
+    wind_layer,
+    elev_layer,
+    distances,
+    upper_limit
+  );
+
   // List to return:
-  List L = List::create(Named("burned_layer") = burned_bin,
-                        Named("burned_ids") = burned_ids(_, seq(0, end)),
-                        Named("counts_veg") = counts_veg);
+  List L = List::create(Named("burned_layer") = burned_com.burned_layer,
+                        Named("burned_ids") = burned_com.burned_ids,
+                        Named("counts_veg") = burned_com.counts_veg);
 
   return L;
 }
