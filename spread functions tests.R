@@ -9,6 +9,7 @@ sourceCpp("spread_functions.cpp")
 source("spread_functions.R")
 sourceCpp("similarity_functions.cpp")
 source("similarity_functions.R")
+sourceCpp("similarity_functions_many_particles.cpp")
 
 # spread_around test ------------------------------------------------------
 
@@ -857,3 +858,61 @@ loglik_fire1
 
 
 # TO DO: check metrics with carefully designed landscapes.
+
+
+
+# emulate_loglik_try_many -------------------------------------------------
+
+# function evaluating many particles.
+
+# function to simulate from the prior
+prior_sim <- function(mu_int = 0, sd_int = 20, r_01 = 0.05, r_z = 0.15) {
+  betas <- c(
+    "intercept" = rnorm(1, mu_int, sd_int),   # shrubland logit (reference class)
+    "subalpine" = rnorm(1, 0, sd_int),        # veg coefficients
+    "wet" = rnorm(1, 0, sd_int),
+    "dry" = rnorm(1, 0, sd_int),
+    "fwi" = rexp(1, r_z),                     # positive
+    "aspect" = rexp(1, r_01),                 # positive (northing)
+    "wind" = rexp(1, r_01),                   # positive
+    "elevation" = (-1) * rexp(1, r_z),        # negative
+    "slope" = rexp(1, r_01)                   # positive
+  )
+  
+  return(betas)
+}
+
+prior_sim()
+
+# make particles
+n_part = 10
+parts <- do.call("rbind", lapply(1:n_part, function(i) prior_sim()))
+
+# reference fire
+fire1 <- simulate_fire_compare(
+  landscape = landscape_arr, # use the SpatRaster
+  burnable = matrix(1, nrow(landscape_arr), ncol(landscape_arr)),
+  ignition_cells = ig_location - 1,
+  coef = coefs,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0
+)
+
+# evaluate log_lik
+set.seed(12)
+loglik_try_many <- emulate_loglik_try_par(
+  landscape = landscape_arr, 
+  burnable = matrix(1, nrow(landscape_arr), ncol(landscape_arr)),
+  ignition_cells = ig_location - 1,
+  particles = parts,
+  wind_layer = wind_column - 1,
+  elev_layer = elev_column - 1,
+  distances = distances,
+  upper_limit = 1.0,
+  
+  fire_ref = fire1,
+  n_replicates = 10
+)
+

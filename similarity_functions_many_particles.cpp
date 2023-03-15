@@ -282,3 +282,79 @@ NumericMatrix emulate_loglik_try(
   colnames(similarity) = names;
   return similarity;
 }
+
+
+// The same function but evaluating many particles all at once. It's implemented
+// this way because turning R objects into C++ ones takes a long time, so, if a 
+// landscape is going to be used to simulate many fires from many particles, 
+// translating the data only once should be more efficient. 
+
+// The coef argument is now replaced by an arma::mat, with particles in rows and
+// parameters in columns.
+
+//' @param arma::mat particles: parameters row_vectors (particles) in logistic 
+//' regression to compute the spread probability as a function of covariates.
+
+// [[Rcpp::export]]
+arma::cube emulate_loglik_try_par(
+    arma::cube landscape,
+    IntegerMatrix ignition_cells,
+    IntegerMatrix burnable,
+    arma::mat particles, // it was coef before, only a vector, now a matrix
+    int wind_layer,
+    int elev_layer,
+    arma::rowvec distances,
+    double upper_limit,
+    List fire_ref,
+    int n_replicates = 10
+) {
+  
+  int n_particles = particles.n_rows;
+  
+  CharacterVector names = CharacterVector::create(
+    "overlap_sp",
+    "overlap_vd",
+    "overlap_norm",
+    "overlap_expquad",
+    "overlap_quad",
+    
+    "sp_norm_5050",
+    "sp_norm_7525",
+    "sp_expquad_5050",
+    "sp_expquad_7525",
+    "sp_quad_5050",
+    "sp_quad_7525"
+  );
+  
+  arma::cube similarity(n_replicates, names.length(), n_particles);
+  arma::rowvec ind_temp(names.length()); 
+  
+  for(int part = 0; part < n_particles; part++) {
+    for(int i = 0; i < n_replicates; i++) {
+      
+      // simulate_fire
+      List fire_sim = simulate_fire_compare(
+        landscape,
+        ignition_cells,
+        burnable,
+        particles.row(part), // this is coef argument, if coef = ..., it doesint owrk
+        wind_layer,
+        elev_layer,
+        distances,
+        upper_limit
+      );
+      
+      ind_temp = compare_fires_try(fire_ref, fire_sim);
+      for(int j = 0; j < names.length(); j++) {
+        similarity(i, j, part) = ind_temp[j];
+      } 
+      // filling the array in vectorized way did not work: 
+      
+      // similarity.slice(part).row(i).fill(ind_temp);
+      // similarity.slice(part).row(i).fill(compare_fires_try(fire_ref, fire_sim));
+    }
+  }
+  
+  // colnames(similarity) = names; // no anda
+  return similarity;
+}
