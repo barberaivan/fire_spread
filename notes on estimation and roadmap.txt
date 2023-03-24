@@ -1,0 +1,159 @@
+Notas GP-ABC para modelo mixto.
+
+El criterio de implausibilidad usado en GP-ABC está definido en base a cuán 
+cercana a 0 sería la posterior en cierta partícula. Pero si aproximamos las
+log-likelihoods por separado, no tenemos idea de cuán implausibles serían 
+ciertas partículas, porque la posterior puede ser muy baja para un fuego y muy 
+alta para otro. Esto se podría resolver definiendo como plausibles a las partículas
+que son plausibles al menos para 1 fuego.
+
+d es la dimensión de los parámetros fijos.
+r es la dim de los jerárquicos (de upper level). 
+
+Si solo hay un eff jerárquico, las group-wise likelihoods tienen d + 1 
+dimensiones. 
+
+W1 termina con r gaussian processes, GP_f. GPJ es la suma de los GP (J por joint),
+y tiene d + r dimensiones. 
+
+e es el efecto aleatorio.
+
+Luego proponemos nuevas partículas en d, part*, 
+obtenemos el MLE de cada e_f en cada GP_f (e_max_f)   [r optimizaciones en 1d por part*]. 
+                                                       calcular costo
+
+
+Evaluamos gp* = GPJ({part*, e_max_.}). 
+Si gp* es bueno en relación al máximo                 [1 optimización en d-dim por wave], 
+                                                       calcular costo
+
+conservamos part*, y le buscamos un e_f por fuego que sea aceptable según GP_f.
+
+Esto parece razonable pero probablemente sea muy costoso optimizar tanto.
+Hay que probar cuánto cuesta optimizar los GP.
+
+
+
+-----
+
+El gran problema es que necesitamos que las likelihoods separadas sean buenas 
+prediciendo en un dominio común. Es decir, debo poder evaluar los parámetros 
+fijos en zonas que serán buenas para algunos fuegos y malas para otros.
+
+
+-----
+
+otra mucho más simple es conservar las partículas en d (fijos) que sean buenas 
+en al menos 1 fuego pero asignarles un e_f que sea aceptable para cada fuego
+(probar 30, y si no, rendirse y agarrar la mejor). 
+Entonces, mantendremos la partícula en las dimensiones que vale la pena
+pero no en aquellas que no vale la pena. 
+
+OJO con la insensibilidad a intercepts grandes: cuando el intercept es muy grande
+y se quema todo el paisaje, los demás params no afectan a la likelihood.
+Esto haría que la like sea plana, y que no podamos bajar ninguna partícula en
+esa zona. O sea, primero hay que limpiar los intercepts demasiado grandes.
+
+
+En general podrían traer problemas las likelihoods planas, porque siempre dirían
+que cualquier partícula es buena, y no nos dejarían restringir el espacio. 
+
+
+----
+
+
+Otra: after W1, calcular la joint likelihood pero como si fuera un efecto fijo. (GP_fixed)
+Eso se puede porque todas las partículas iniciales fueron evaluadas tenían
+el mismo intercept. Entonces evaluamos si los efectos fijos son razonables
+con ese modelo conjunto, y luego, con cada modelo separados miramos la
+plausibility de los random. 
+
+Entonces, una partícula es razonable si cumple con lo siguiente: 
+
+* es buena al evaluarla en el GP_fixed usando su parte fija, maximizando su 
+  intercept 
+  
+  OR
+  
+* es buena en algún GP_f (evaluar en una secuencia de intercepts?).
+  Acá se puede sortear si entra o no dando más importancia a este filtro en 
+  las likelihoods que no son planas.
+
+wiggliness: rango de logliks (estimadas) estimadas para las partículas en cuestión.
+peso: wigglinesses normalizadas
+
+Esta sería una forma alternativa a la primera, requiriendo menos optimizaciones.
+
+
+----------------
+
+
+Forma más simple: ajustar cada likelihood igual que propone Wilkinson (2014), 
+pero con esta modificación: 
+	en MCMC, cuando evaluamos la likelihood de una partícula, no rechazar directamente
+	cuando la partícula es implausible, sino registrar su likelihood usando el GP 
+	apropiado. 
+De esta manera, una partícula puede tener muy baja likelihood para un fuego pero no para
+los demás, y eso puede ser considerado más tarde. 
+
+
+
+----------------
+
+
+Otra opción a considerar: Lunn method. 
+
+Estimar el modelo completamente mixto (o sea, todos los parámetros varían por fuego)
+en 2 pasos, como Lunn 2013 (código en Bringing bayesian models to life).
+
+Este método requiere que todos los parámetros varíen por grupo (fuego). Eso sería
+un problema para el FWI, lo cual puede resolverse de la siguiente manera: 
+	El FWI no se define a nivel de pixel sino que es constante a nivel del área de estudio,
+	variando únicamente entre años. De esta manera, lo usamos como predictora a nivel de los 
+	hiperparámetros, modelando la media del intercept. Así solo entra en el juego en el 
+	segundo paso de la estimación.
+
+IMPORTANTE: basado en simulaciones noté que el tamaño del fuego depende de la interacción
+entre el intercept y otros parámetros, con correlaciones negativas. Entonces, si a todos los
+parámetros se les permite variar por fuego, deberían seguir una distribución multivariada.
+
+Los parámetros con signo restringido podrían estimarse en escala log, y así asumiríamos
+una normal multivariada para [error, slopes], donde 
+
+intercept[f] = alpha + beta_fwi * fwi[f] + error[f]
+
+La peor crítica para esto es que la tendencia de FWI podría ser muy sensible a la definición 
+del área de estudio. Esto podría explorarse mirando la serie entre 1999 y 2022 
+usando distintas porciones: N, S, toda, ensanchada, etc.
+
+
+
+---------------------
+
+Estimación, pasos a seguir:
+
+
+1) Seleccionar similarity index.
+
+2) Estimar modelo de efectos fijos y ver cómo ajusta (sin validación cruzada).
+	 Ojo acá, tener en cuenta que la distribución de tamaños simulados puede estar 
+	 truncada arriba (fuegos que se escapan del paisaje). O sea que los DHARMa 
+	 residuals van a estar super encogidos.
+
+3) Calibrar modelo mixto (solo intercept) usando el paisaje de cholila.
+
+4) Estimar modelo mixto (solo intercept).
+
+5) Calibrar full mixed model usando cholila landscape.
+
+6) Estimar full mixed model. 
+
+7) Comparar full mixed model contra random-intercept, usando las distribuciones
+	 completas de los efectos aleatorios (no el fire-wise parameter, sino nuevos
+	 simulados).
+
+
+
+
+
+

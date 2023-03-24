@@ -8,6 +8,9 @@ library(Rcpp)
 library(terra)
 library(tidyverse)
 library(microbenchmark)
+library(foreach)
+library(doParallel)
+library(doRNG)
 
 # load cpp functions:
 sourceCpp("similarity_functions_many_particles.cpp")
@@ -91,11 +94,105 @@ emu_r <- function(parts) {
 mbm <- microbenchmark(
   r_loop = {rr <- emu_r(parts = parts)},
   cpp_loop = {cpp <- emu_cpp(parts = parts)},
-  times = 1
+  times = 3
 )
 mbm
+# muy raro, ligeramente más rapido loopear en r que en cpp.
 
 identical(rr, cpp)
 all.equal(rr, cpp)
 
-# muy raro, más rapido loopear en r que en cpp
+# compare RAM
+pr <- peakRAM::peakRAM(
+  {rr <- emu_r(parts = parts)},
+  {cpp <- emu_cpp(parts = parts)}
+)
+pr # very similar
+
+
+# Compare functions when paralelized ----------------------------------------
+
+# wrapper functions for evaluate_loglik, taking one particle or many.
+
+# one particle
+emulate_loglik_one <- function(fire, particle) {
+  loglik <- emulate_loglik_try(
+    landscape = fire$landscape[, , 1:7], 
+    burnable = fire$landscape[, , "burnable"],
+    ignition_cells = fire$ig_rowcol,
+    coef = particle,
+    wind_layer = which(dimnames(fire$landscape)[[3]] == "wind") - 1,
+    elev_layer = which(dimnames(fire$landscape)[[3]] == "elev") - 1,
+    distances = distances,
+    upper_limit = 1.0,
+    
+    fire_ref = fire[c("burned_layer", "burned_ids", "counts_veg")],
+    n_replicates = 10
+  )
+  return(loglik)
+}
+
+# many
+emulate_loglik_many <- function(fire, particles_matrix) {
+  loglik <- emulate_loglik_try_par(
+    landscape = fire$landscape[, , 1:7], 
+    burnable = fire$landscape[, , "burnable"],
+    ignition_cells = fire$ig_rowcol,
+    particles = particles_matrix,
+    wind_layer = which(dimnames(fire$landscape)[[3]] == "wind") - 1,
+    elev_layer = which(dimnames(fire$landscape)[[3]] == "elev") - 1,
+    distances = distances,
+    upper_limit = 1.0,
+    
+    fire_ref = fire[c("burned_layer", "burned_ids", "counts_veg")],
+    n_replicates = 10
+  )
+  return(loglik)
+}
+
+# Loop over every particle by core. for every particle the data should be copied
+# to every worker.
+loglik_eval_par1 <- function(fire, particles_list) {
+  # particles must be a list!
+  result <- foreach(pp = particles_list) %dopar% {
+    emulate_loglik_one(fire, pp)
+  }
+  return(result)
+}
+
+# every core takes a matrix of particles. In this way the data is copied only 
+# once to each worker.The particles_mats is a list containing the matrix of 
+# particles for every core. Its length should be equal to n_cores
+loglik_eval_par2 <- function(fire, particles_mats) {
+  # particles must be a list!
+  result <- foreach(pp = particles_mats) %dopar% {
+    emulate_loglik_many(fire, pp)
+  }
+  return(result)
+}
+
+
+# Set up cluster
+n_cores <- 10
+cl <- makeCluster(n_cores, type = "FORK")
+registerDoParallel(cl)
+registerDoRNG(seed = 123)
+
+# make particles (all with high intercept, so all fires are the same)
+n_part <- n_cores * 10
+p_base <- c(1e5, rep(0, 8))
+p_list_single <- lapply(1:n_part, function(x) p_base)
+n_part_core <- n_part / n_cores
+p_list_mat <- lapply(1:n_cores, function(x) {
+  matrix(p_base, nrow = n_part_core, ncol = length(p_base), byrow = TRUE)
+})
+
+mbm_par <- microbenchmark(
+  one = {test1 <- loglik_eval_par1(fire, p_list_single)},
+  many = {test2 <- loglik_eval_par2(fire, p_list_mat)},
+  times = 5
+); mbm_par
+
+# Ram start at 5 Gb
+# one: peaks at ~75 % (with 10 cores) and remains quite steady.
+# dan lo mismo.

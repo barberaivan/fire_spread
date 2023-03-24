@@ -236,7 +236,7 @@ loglik_fire_particle <- function(fire, particle) {
 }
 
 part <- c(1000, rep(0, 8)) # terrible coefficients (the worst)
-loglik_fire_particle(fire_data[[1]], part)
+# loglik_fire_particle(fire_data[[1]], part)
 
 # make particles
 n = 20; d = 9
@@ -418,8 +418,13 @@ bench_16cores <- microbenchmark(
 # 2015_53 (Alerces 2015)
 13.86646 * 10 * 10 * 15 / 3600 # = 5.777692 h  
 
-
-
+# proporción de cada veg type para Alerces 2015:
+ff <- fire_data[["2015_53"]] 
+ll <- do.call("cbind", lapply(1:3, function(x) as.numeric(ff$landscape[, , x])))
+head(ll)
+vegs <- c(sum(ff$landscape[, , "burnable"]) - sum(colSums(ll)),
+          colSums(ll))
+vegs / sum(vegs) * 100
 
 
 # prueba para ver qué pasa con doRNG cuando la RAM se va a tope.

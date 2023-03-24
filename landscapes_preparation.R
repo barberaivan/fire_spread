@@ -1,4 +1,4 @@
-# This script prepares the landscapes where fires are gonna be simulated.
+# This script prepares the landscapes where fires are going to be simulated.
 
 # The first step is to extract the elevation layer from all images to use as
 # input in windninja. These files will be saved as wind_*fire id*.tif.
@@ -394,6 +394,86 @@ sum(landscape[, "burnable"]) / nrow(landscape) # 84 % quemable
 saveRDS(landscape, paste(data_dir, "data_2021_865_landscape.rds", sep = ""))
 
 
-## IMPORTANT!!! Save as rds all R files
 
+# Export csv files to import them in C++ ----------------------------------
 
+# File names are composed as <[FIRE_ID]-[OBJECT_NAME].csv>, and were produced
+# in the <landscapes_preparation.R> script. All files have column names. 
+# There is one csv by fire and by object type, which are the following:
+
+# landscape.csv: landscape data, including the burnable layer (not the burned).
+#   Each landscape layer (matrix) is vectorized by column. The csv has a row by 
+#   pixel and a column by variable (landscape layer). 
+#   NOTE: This is not how the terra R package converts the matrices into vectors.
+#   They fill the vector by row, not by column.
+# burned_ids.csv: ids of the burned cells in the observed fire, as {row, column} 
+#   vectors. Every row is a burned pixel, first column is the row id, the second
+#   is the column id. Row and column indexes of each pixel start at 0.
+# ignition_points.csv: similar to burned_ids, but only containing the pixels were
+#   the observed fire begun (usually just one).
+# metadata.csv: a column by variable, as follows
+#   size_rows = landscape size in rows,
+#   size_cols = landscape size in columns,
+#   counts_veg_shrubland = number of burned pixels in shrubland vegetation,
+#   counts_veg_subalpine = number of burned pixels in subalpine vegetation,
+#   counts_veg_wet = number of burned pixels in wet forest vegetation,
+#   counts_veg_dry = number of burned pixels in dry forest vegetation.
+
+# In addition, all fire lists will be saved separately, only named by the fire id.
+# (useful for model fitting)
+
+fires <- readRDS(file.path("..", "fire_spread_data", "landscapes_ig-known_non-steppe.rds"))
+target_dir <- file.path("..", "fire_spread_data", "focal fires data", 
+                        "landscapes_ig-known_non-steppe_csv-files")
+
+for(f in 1:length(fires)) {
+  print(f)
+  # save separate fire lists
+  fname <- paste(names(fires)[f], ".rds", sep = "")
+  # saveRDS(
+  #   fires[[f]],
+  #   file.path("..", "fire_spread_data", "focal fires data", 
+  #             "landscapes_ig-known_non-steppe", fname)
+  # )
+  
+  # write landscape in vector form (fill vector by column)
+  l <- do.call("cbind", lapply(1:8, function(x) {
+    fires[[f]]$landscape[, , x] %>% as.numeric
+    }
+  ))
+  colnames(l) <- dimnames(fires[[f]]$landscape)[[3]][1:8]
+  write.csv(l, file.path(target_dir, 
+                         paste(names(fires)[f], "landscape.csv", sep = "-")),
+            row.names = FALSE)
+  
+  # write burned_ids
+  bid <- t(fires[[f]]$burned_ids)
+  colnames(bid) <- c("row_id", "col_id")  
+  write.csv(bid, 
+            file.path(target_dir, 
+                      paste(names(fires)[f], "burned_ids.csv", sep = "-")),
+            row.names = FALSE)
+  
+  # write ignition point
+  igp <- t(fires[[f]]$ig_rowcol)
+  colnames(igp) <- c("row_id", "col_id")  
+  write.csv(igp, 
+            file.path(target_dir, 
+                      paste(names(fires)[f], "ignition_points.csv", sep = "-")),
+            row.names = FALSE)
+  
+  # metadata
+  metadata <- data.frame(
+    size_rows = dim(fires[[f]]$landscape)[1],
+    size_cols = dim(fires[[f]]$landscape)[2], 
+    counts_veg_shrubland = fires[[f]]$counts_veg[1],
+    counts_veg_subalpine = fires[[f]]$counts_veg[2],
+    counts_veg_wet = fires[[f]]$counts_veg[3],
+    counts_veg_dry = fires[[f]]$counts_veg[4]
+  )
+  
+  write.csv(metadata, 
+            file.path(target_dir, 
+                      paste(names(fires)[f], "metadata.csv", sep = "-")),
+            row.names = FALSE)
+}
