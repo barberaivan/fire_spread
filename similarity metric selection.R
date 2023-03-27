@@ -84,9 +84,12 @@ prior_sim <- function(mu_int = 0, sd_int = 20, sd_veg = 5,
 prior_q <- function(p, mu_int = 0, sd_int = 20, sd_veg = 5,
                     r_01 = 0.05, r_z = 0.15) {
   
+  # add null column for fwi in p
+  p <- cbind(p[, 1:4], rep(0, nrow(p)), p[, 5:8])
+  
   q <- matrix(NA, nrow(p), ncol(p))
-  colnames(q) <- c("intercept", "subalpine", "wet", "dry",
-                   "aspect", "wind", "elevation", "slope") # without fwi
+  colnames(q) <- c("intercept", "subalpine", "wet", "dry", "fwi",
+                   "aspect", "wind", "elevation", "slope") 
   colnames(p) <- colnames(q)
   
   # fill matrix with parameters samples
@@ -103,6 +106,9 @@ prior_q <- function(p, mu_int = 0, sd_int = 20, sd_veg = 5,
   
   q[, "elevation"] <- qexp(p[, "elevation"], rate = r_z)
   
+  # fill null fwi parameter
+  q[, "fwi"] <- 0
+  
   return(q)
 }
 
@@ -115,56 +121,8 @@ rast_from_mat <- function(m, fill_raster) { # fill_raster is a SpatRaster from t
   return(r)
 }
 
-# Data and constants -----------------------------------------------------
-
-# landscape to run the simulations
-land_full <- readRDS(file.path("..", "fire_spread_data", "focal fires data",
-                              "landscapes_ig-known_non-steppe", "2015_53.rds"))
-land <- land_full$landscape
-
-dnames <- dimnames(land)[[3]]
-
-# terra-raster of the same landscape (with elevation) for plotting purposes.
-# only the raster structure is needed, not its data.
-land_raster <- rast(file.path("..", "fire_spread_data", "focal fires data",
-                              "wind ninja files", "2015_53.tif"))
-
-# constants for fire spread simulation
-
-distances <- rep(30, 8) # sides
-distances[c(1, 3, 6, 8)] <- 30 * sqrt(2)
-
-upper_limit <- 0.5
-
-# ignition points
-ig_cumprob <- expand.grid(x = ppoints(2), y = ppoints(2))
-# in this way, the third ignition point (following terra ordering) falls in non-
-# burnable. edit it.
-ig_cumprob$x[3] <- 0.15
-
-ig_rowcol <- rbind(
-  row = quantile(0:(nrow(land) - 1), probs = ig_cumprob$y) %>% round,
-  col = quantile(0:(ncol(land) - 1), probs = ig_cumprob$x) %>% round
-)
-ig_cells <- cellFromRowCol(land_raster, 
-                           row = ig_rowcol["row", ] + 1,
-                           col = ig_rowcol["col", ] + 1)
-
-# plot
-# check_rast <- rast_from_mat(land[, , "burnable"], land_raster)
-# values(check_rast)[ig_cells] <- 2
-#plot(check_rast)
-
-# check_rast2 <- rast_from_mat(land[, , "burnable"], land_raster)
-# values(check_rast2)[ig_cells] # OK
-
-# Prior predictive check --------------------------------------------------
-
-# Obtain a prior distribution that avoids fires that burn the whole landscape
-# or more. The intercept is the most important parameter in this regard.
-
-ig_rowcol <- matrix(c(round(ncol(land) * 0.4), round(nrow(land) * 0.3))) - 1
-
+# Function to simulate and plot a few fires to choose parameters that make sense
+# in the focal landscape.
 fire_prior_sim <- function(prior = prior_sim()) {
   
   sizes <- numeric(3)
@@ -197,23 +155,169 @@ fire_prior_sim <- function(prior = prior_sim()) {
   return(sizes)
 }
 
+
+# Fire simulator as a function of the particle (fixed landscape)
+# just a loop over for simulate_fire_compare()
+emulate_loglik_particle <- function(particle, n_sim = 10) {
+  
+  metrics <- array(NA, dim = c(n_obs, n_sim, n_met))
+  
+  for(o in 1:n_obs) {
+    for(i in 1:n_sim) {
+      fire_sim <- simulate_fire_compare(
+        landscape = land[, , 1:7],
+        burnable = land[, , "burnable"],
+        ignition_cells = ig_rowcol,
+        coef = particle, # without id
+        wind_layer = which(dnames == "wind") - 1,
+        elev_layer = which(dnames == "elev") - 1,
+        distances = distances,
+        upper_limit = upper_limit
+      )
+      
+      metrics[i, o, ] <- compare_fires_try(fire_sim, fires_real[[o]])
+    }
+  }
+  
+  
+  #### SEGUIR ACÁ
+  
+  return(sims)
+}
+
+# Fire simulator to simulate over a list of particles. It returns a list as long
+# as the evaluated particles, where the names of the list have the id of the
+# particle in the long sobol sequence. This is used to avoid recomputing 
+# particles.
+
+cl <- makeCluster(parallel::detectCores(), type = "FORK")
+registerDoParallel(cl)
+registerDoRNG(seed = 123)
+
+emulate_loglik_parallel <- function(particle_mat) {
+  
+  # particle_mat <- particles_all[1:20, ]
+  # prepare particles and ids
+  ids <- particle_mat[, 1]
+  particles_list <- lapply(1:nrow(particle_mat), function(x) particle_mat[x, -1])
+  
+  # simulate in parallel
+  result <- foreach(pp = particles_list) %dopar% {
+    simulate_fire_compare_particle(pp)  ## USAR EMULATE_LOGLIK_PARTICLE
+  }
+  
+  # set ids
+  names(result) <- ids
+  
+  return(result)
+}
+
+
+# Data and constants -----------------------------------------------------
+
+# landscape to run the simulations
+land_full <- readRDS(file.path("..", "fire_spread_data", "focal fires data",
+                              "landscapes_ig-known_non-steppe", "2015_53.rds"))
+land <- land_full$landscape
+
+dnames <- dimnames(land)[[3]]
+
+# terra-raster of the same landscape (with elevation) for plotting purposes.
+# only the raster structure is needed, not its data.
+land_raster <- rast(file.path("..", "fire_spread_data", "focal fires data",
+                              "wind ninja files", "2015_53.tif"))
+
+# constants for fire spread simulation
+
+distances <- rep(30, 8) # sides
+distances[c(1, 3, 6, 8)] <- 30 * sqrt(2)
+
+upper_limit <- 0.5
+
+# ignition points
+ig_rowcol <- matrix(c(round(ncol(land) * 0.4), round(nrow(land) * 0.3))) - 1
+
+# number of particles to choose by wave
+n_pw <- 1000 
+
+# number of real parameters to simulate
+n_rep <- 20
+
+# number of fires to simulate by parameter
+n_sim <- 10
+
+# Parameters simulation --------------------------------------------------
+
 # Choose parameter vectors by hand, visually inspecting a few simulations
-# from every one to check that fire sizes are OK with this
-# landscape.
+# from every one to check that fire sizes are OK with this landscape.
+# (Finding a prior that would simulate proper-sized fires was too hard.)
 
 # pp <- prior_sim(mu_int = -1.0, sd_int = 0.02, sd_veg = 0.02,
 #                 r_z = 1.5, r_01 = 1.1) 
 # pp
 # fire_prior_sim(pp)
 # 
-# n_rep <- 30
 # # param_mat <- matrix(NA, n_rep, 9)
 # param_mat[30, ] <- pp
 # saveRDS(param_mat, "files/param_mat.rds")
 param_mat <- readRDS("files/param_mat.rds")
 
-# Simulation variance is small when at least a few covariates show large effects.
-# Consider, for example, elevation. A large negative effect implies very high
-# burn probability in all the lowlads (below average elevation).
 
-curve(dexp(x, 0.5), to = 20); abline(h = 0, col = "red")
+# Simulate fires ----------------------------------------------------------
+
+# n_rep (parameters) * n_sim (fires) will be simulated in the same landscape. 
+seeds <- matrix(100:(100 + n_rep * n_sim - 1),
+                nrow = n_sim, ncol = n_rep)
+
+data_id <- expand.grid(sim = 1:n_sim, 
+                       rep = 1:n_rep)
+n_obs <- nrow(data_id)
+
+fires_real <- vector(mode = "list", length = n_obs)
+
+for(i in 1:n_obs) {
+    
+  r = data_id$rep[i]
+  s = data_id$sim[i]
+    
+  set.seed(seeds[s, r])
+    
+  fires_real[[i]] <- simulate_fire_compare(
+    landscape = land[, , 1:7],
+    burnable = land[, , "burnable"],
+    ignition_cells = ig_rowcol,
+    coef = param_mat[r, ],
+    wind_layer = which(dnames == "wind") - 1,
+    elev_layer = which(dnames == "elev") - 1,
+    distances = distances,
+    upper_limit = upper_limit
+  )
+}
+
+
+# Long sobol sequence -----------------------------------------------------
+
+# for all estimations to run over the same particles (when possible), a very long
+# sobol sequence will be produced, expecting not to need further "simulations".
+n_large <- 300000
+
+particles_all_raw <- prior_q(sobol(n_large, dim = 8, seed = 123), # without FWI
+                         mu_int = -1.0, sd_int = 0.05, sd_veg = 0.05,
+                         r_z = 1.3, r_01 = 1.0)
+# this prior is widened relative to the one used to simulate fires
+
+# add particle ID to avoid recomputing fires
+particles_all <- cbind(part_id = 1:nrow(particles_all_raw), particles_all_raw)
+
+# Wave 1 ------------------------------------------------------------------
+
+# get the first n_pw particles
+parts_01 <- particles_all[1:20, ]
+
+part_list <- lapply(1:nrow(parts_01), function(x) parts_01[x, -1])
+
+fires_01 <- simulate_fires_parallel(particles_all[1:n_pw, ])
+
+# compute 200 * 1000 DISCREPANCIES
+# 
+# 
