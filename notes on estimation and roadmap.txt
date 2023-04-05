@@ -154,6 +154,88 @@ Estimación, pasos a seguir:
 
 
 
+----------------------------------------------------------------------------
+2023-04-04
+
+Todo lo anterior probablemente esté desactualizado. El problema con el que lidio
+ahora es que la likelihood está bounded por el tamaño y la resolución del paisaje,
+entonces necesito una función que extrapole fuera del rango de los datos de manera
+decreciente. Los GP no logran eso porque son muy locales, y todas las restricciones
+que intenté ponerles afectan el ajuste en la zona con datos. 
+
+Opciones:
+
+[1] híbrido: GP + MVN. Usar un GP en la zona lejos de los bounds (alta loglik),
+    pero una función MVN fuera de rango, para forzar algo decreciente. 
+    Eventualmente el MVN puede ser una skew-normal multivariada. 
+    
+    A Pájaro le parece medio feo estar usando dos modelos distintos.
+    
+[2] GAM. Poniendo penalty de orden 2 (sobre la derivada segunda de la curva), 
+    lo único que queda sin penalizar son las rectas, extrapolando linealmente 
+    fuera de rango. Esto puede lograrse con bs = "tp", pero Gavin Simpson dice
+    que las B-splines son más flexibles. Mirar la ayuda de 
+    ?mgcv::b.spline
+    en ese código, cambiando la penalty de 1 a 2 se observa lo que digo. 
+    
+    De esta manera podríamos estar estimando un modelo con te() o ti() 
+    que logre lo que queremos.
+    Lo difícil acá será definir la dimensión del problema.
+    
+    Quizás se pueden definir las smooth marginales y las interacciones dobles
+    por otro lado, sin interacciones de mayor orden.
+    
+    Las "cr" son las que mejor andan y usan penalty de orden 2 (no penalizan
+    las rectas.)
+    
+    Algo así podría funcionar:
+    
+    loglik ~ s(intercept, bs = "cr", k = k_marg) + ... + # marginales
+             ti(intercept, wet, bs = "cr", k = k_int)    # interacciones dobles.
+    
+    con 
+    k_marg <- 6 # bases marginales
+    k_int <- 4  # bases de interacción
+    d <- 9      # parametros de propagacion, tendremos
+    d * k_marg + ncol(combn(9, 2)) * k_int # parámetros que estimar
+    # 189
+    
+    Probar si un modelo que tenga solo interacciones dobles puede emular bien 
+    una MVN.
+    
+[3] Skew-Normal multivariada. Y nada más, sin GP ni nada.
 
 
+#########################
 
+TAREAS (2023-04-04):
+
+01 - Seguir con el código de filtrado de partículas. (mañana)
+
+02 - Comparar cómo los modelos ajustan a los datos:  (semana que viene)
+     GAM, MVN, skew-MVN, skew-MV-student_t, GP.
+     (train-test?)
+     
+     Probar una skew-MV-t!!
+     dmst(x, xi=rep(0,length(alpha)), Omega, alpha, nu=Inf, log=FALSE)
+     xi es location, 
+     Omega is scale (a vcov matrix)
+     alpha is the asymmetry vector and
+     nu is the df. if nu <= 1, there is no mean!!, worse than a Cauchy!
+     
+     This is very flexible!
+     
+     Caution: for the distribution to be used for sampling it might be necessary
+     to move sign-constrained parameters to the log-scale. In this way, if the
+     mode is near 0, the distribution may still be used for simulation. 
+     Another solution could be simply to reject the samples out of bounds, but 
+     the former approach sounds safer.
+     
+     Number of parameters:
+     d = 9
+     params = 
+     9 * 4 + # locations, scales, skewneses and kurtoses
+     ncol(combn(9, 2)) # correlations
+     # 72 :) 
+
+     initial values might arise from marginal and bidimensional computations.
