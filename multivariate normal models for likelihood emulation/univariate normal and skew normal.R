@@ -122,15 +122,6 @@ abline(0, 1)
 # compile stan model
 smodel2 <- stan_model(file.path(focal_folder, "univariate skew-normal.stan"), 
                       verbose = TRUE)
-smodel3 <- stan_model(file.path(focal_folder, "univariate skew-normal_centred.stan"), 
-                      verbose = TRUE)
-
-
-# problematic parameters:
-# xi = -0.4135036
-# sigma = 0.611926
-# alpha = 3
-# x [-5, 5]
 
 # prior for sigma
 sigma_prior_sd <- 3
@@ -145,10 +136,19 @@ alpha_prior_sd <- 5
 xi <- rnorm(1)
 sigma <- rht(1, nu = sigma_prior_nu, sigma = sigma_prior_sd)
 alpha <- -7#rnorm(1, 0, alpha_prior_sd)
-N <- 2000
-x <- runif(N, -5, 5)
 
+# try a nice shape
+xi <- 0; sigma <- 1; alpha <- 7
+
+N <- 10000
+x <- runif(N, -5, 5) # hasta 5 antes. hasta 2 estima re bien porque no genera mues tan bajos
 mu <- skew_normal_lupdf(x, xi, sigma, alpha)  
+
+# use only data with mu > log(0.1)
+keep <- which(mu > log(0.1))
+mu <- mu[keep]
+x <- x[keep]
+N <- length(mu)
 
 # simulate tau, the residual standard deviation based on sd(mu) to get
 # an R2 near 0.8
@@ -159,61 +159,59 @@ y <- rnorm(N, mu, tau)
 plot(y ~ x, col = rgb(0, 0, 0, 0.2), pch = 19)
 curve(skew_normal_lupdf(x, xi = xi, sigma = sigma, alpha), add = TRUE, lwd = 1.8,
       col = "blue")
-sc <- sd(y)
+
 sdata2 <- list(
   # data
-  x = x, y = y / sc, N = N,
+  x = x, y = y, N = N,
   
   # prior parameters
   xi_prior_sd = 10,
-  sigma_prior_sd = 3,#sigma_prior_sd,
+  sigma_prior_sd = 20,#sigma_prior_sd,
   sigma_prior_nu = 200,#sigma_prior_nu,
   tau_prior_sd = 20,
   tau_prior_nu = 200,
-  alpha_prior_sd = 20
+  alpha_prior_sd = 20,
+  
+  # true parameter values
+  xi_true = xi,
+  sigma_true = sigma,
+  alpha_true = alpha,
+  tau_true = tau
 )
-
 m2 <- sampling(smodel2, data = sdata2, seed = 2126, 
                cores = 2, chains = 2, iter = 2000, warmup = 1000)
 pairs(m2, pars = c("xi", "sigma", "alpha", "tau"))
 
-# symmetric model to compare
-m2sym <- sampling(smodel1, data = sdata2, seed = 2126, 
-                  cores = 2, chains = 2, iter = 2000, warmup = 1000)
+# check mu is computed well.
+mu_etc_stan_raw <- as.matrix(m2, pars = "mu_true_etc")[1, ] # they are all the same
+mu_etc_stan <- matrix(mu_etc_stan_raw, ncol = 10)
+colnames(mu_etc_stan) <- c("log_den", "log_cum", "mu",
+                           "x_centred", "x_centred2", "prec",
+                           "shifted", "erf", "phi",
+                           "mu_phi")
+# plot(mu_stan ~ mu); abline(0, 1)
+test_mat <- cbind(mu_etc_stan, mu_r = mu)
+View(test_mat)
+plot(test_mat[, "mu_phi"] ~ test_mat[, "mu_r"]); abline(0, 1)
+all.equal(test_mat[, "mu_phi"], test_mat[, "mu_r"])
+# Now mu is well computed. The problem was on the imprecision of stan::erf(),
+# and it was resolved with stan::Phi()
 
-
-# very high posterior correlation between sigma and alpha in some replicates, 
-# and it is not related to the zero-ness of alpha.
-# But this makes no problem. Maybe just a bit harder to sample.
-# neffs are lower than before, for sigma and alpha.
-
-# I found a parameter vector which made the estimation quite difficult. Although
-# the curve is clearly assymetric, it can't find sesible parameter values.
-# Explore curves from complicated parameters
+# Plot fitted mu
 samples2 <- extract(m2, pars = c("xi", "sigma", "alpha"))
-samples2sym <- extract(m2sym, pars = c("xi", "sigma"))
 
-plot(y ~ x, col = rgb(0, 0, 0, 0.2), pch = 19, main = "alpha positive")
+plot(y ~ x, col = rgb(0, 0, 0, 0.2), pch = 19)
 curve(skew_normal_lupdf(x, xi = xi, sigma = sigma, alpha), add = TRUE, lwd = 1.8,
       col = "blue")
 for(i in 1:500) {
   id <- sample(1:length(samples2$alpha), 1)
-  curve(sc * skew_normal_lupdf(x, samples2$xi[id], samples2$sigma[id], samples2$alpha[id]), 
+  curve(skew_normal_lupdf(x, samples2$xi[id], samples2$sigma[id], samples2$alpha[id]), 
         add = TRUE, lwd = 0.5, col = rgb(1, 0, 0, 0.05))
 }
-# curves without asymmetry to compare:
-for(i in 1:500) {
-  id <- sample(1:length(samples2sym$sigma), 1)
-  curve(sc * skew_normal_lupdf(x, samples2sym$xi[id], samples2sym$sigma[id], 0), 
-        add = TRUE, lwd = 0.5, col = rgb(1, 1, 0, 0.05))
-}
-# Here it's not so clear whether the symmetric model or the underestimated-symmetric
-# is better, but DHARMa analysis suggests that the asymmetric is better.
-
 
 # Compare parameters
-head(sm2 <- summary(m2)[[1]])
-summ <- as.data.frame(sm2[1:4, c("mean", "2.5%", "97.5%")])
+head(sm2 <- summary(m2, pars = c("xi", "sigma", "alpha", "tau"))[[1]])
+summ <- as.data.frame(sm2[, c("mean", "2.5%", "97.5%")])
 colnames(summ) <- c("mean", "lower", "upper")
 summ$observed <- c(xi, sigma, tau, alpha)
 ggplot(summ, mapping = aes(x = observed, y = mean, ymin = lower, ymax = upper)) +
@@ -226,152 +224,36 @@ samples2 <- extract(m2, pars = c("xi", "sigma", "tau", "alpha"))
 n_sim <- length(samples2$xi)
 y_sim <- sapply(1:n_sim, function(i) {
   mu <- skew_normal_lupdf(x, samples2$xi[i], samples2$sigma[i], samples2$alpha[i])
-  y_ <- rnorm(N, mu, samples2$tau[i]) * sc
-}) # OK, columns are replicates
-res <- createDHARMa(y_sim, y)
-plot(res)
-
-# asymmetric model
-n_sim <- length(samples2sym$xi)
-y_sim <- sapply(1:n_sim, function(i) {
-  mu <- skew_normal_lupdf(x, samples2sym$xi[i], samples2sym$sigma[i], 0)
-  y_ <- rnorm(N, mu, samples2$tau[i]) * sc
+  y_ <- rnorm(N, mu, samples2$tau[i])
 }) # OK, columns are replicates
 res <- createDHARMa(y_sim, y)
 plot(res)
 
 
-
-
+# fitted mu and real mu
 plot(rowMeans(y_sim) ~ mu, pch = 19, col = rgb(0, 0, 0.8, 0.05),
      ylab = "Estimated mu", xlab = "Real mu")
 abline(0, 1)
 
-
-
-# Notes on the problematic parameters:
-# problematic parameter values:
-# xi = -0.4135036
-# sigma = 0.611926
-# alpha = 3
-# x [-5, 5]
-
-# It was impossible for the chains to converge due to the scale of the data,
-# sd(y): ~78.
-# once I replaced y* = y / sd(y), the model converged. However, assymetry is 
-# underestimated, and a quite gaussian-like function is estimated. 
-# Would it be resolved with more N? It's already high! (2000)
-# No, changing the N to 8000 didn't resolve it. Maybe increasing the R2?
-# A curious thing is that the prior on alpha is not regularizing, so it
-# has no reason to underestimate it.
-# No, increasing the R2 to 0.997 did not help to estimate it
-
-# I gave up. For some shapes, the model fails to estimate a truly asymmetric 
-# curve.
-
-# It seems that always |alpha| is underestimated and sigma is overestimated.
-# with mild asymmetry, it doesn't cause problems, because fitted and real mu
-# are the same. The problem is more evident with higher asymmetries.
-
-# perhaps we should use the centred parameterization of the skew-normal, 
-# but that is quite much work.
-
-
 # Extras
 
 # mu computed in R and Stan
-mu_stan <- as.matrix(m2sc, "mu") %>% t
+mu_stan <- as.matrix(m2, "mu") %>% t
 all.equal(mu_stan[, 1], 
-          skew_normal_log_mu(x, samples2$xi[1], samples2$sigma[1],
+          skew_normal_lupdf(x, samples2$xi[1], samples2$sigma[1],
                              samples2$alpha[1]))
-j = 3
+j = sample(1:2000, 1)
 plot(mu_stan[, j] ~ 
-     skew_normal_log_mu(x, samples2$xi[j], samples2$sigma[j], samples2$alpha[j]))
+     skew_normal_lupdf(x, samples2$xi[j], samples2$sigma[j], samples2$alpha[j]))
 abline(0, 1)
-# not exactly the same, but almost. It shouldn't be a problem
+# not exactly the same, but almost. It shouldn't be a problem. Maybe it's caused
+# by contrasting sensitivity in decimals between R and Stan.
 
 
-# try with a centered parameterization on sigma and alpha:
-m3 <- sampling(smodel3, data = sdata2, seed = 2123, 
-               cores = 2, chains = 2, iter = 2000)
-pairs(m3, pars = c("xi", "sigma", "alpha", "tau"))
-pairs(m3, pars = c("xi", "sigma_raw", "alpha_raw", "tau"))
-# the posterior correlation remains.
+# Notes on univariate skew-normal -----------------------------------------
 
-# try almost flat priors on alpha and sigma: do they make a problem?
-sdata4 <- list(
-  # data
-  x = x, y = y, N = N,
-  
-  # prior parameters
-  xi_prior_sd = 50,
-  sigma_prior_sd = 1e5,
-  sigma_prior_nu = sigma_prior_nu,
-  tau_prior_sd = 5,
-  tau_prior_nu = 3,
-  alpha_prior_sd = 1e5
-)
-m4 <- sampling(smodel2, data = sdata4, seed = 2123, 
-               cores = 2, chains = 2, iter = 2000)
-pairs(m4, pars = c("xi", "sigma", "alpha", "tau"))
-# no, the flat priors do not seem to be a problem for now.
-
-
-
-
-
-# skew-normal dp and cp ---------------------------------------------------
-
-
-# perhaps the asymmetry underestimation problem could be improved by using the 
-# cp parameterization. however, it would take time to implement it in Stan. 
-# moreover, parameterizing on the cp scale requires a few constraints...
-# Betancourt explains how to impose them in the transformed parameters block
-# and how it works (rejects if violated)
-# https://groups.google.com/g/stan-users/c/fAqBYSf3u6o
-
-# By now, a moderate-asymmetry model could probably fit the data well. Unless the 
-# emulated likelihood is truly asymmetric, keep it simple. 
-# (it's not that I'll be fitting a symmetric normal.)
-
-# Some functions from sn could be translated to Stan.
-
-getAnywhere("delta.etc")
-# it's translatable
-
-getAnywhere("cp2dp")[1]
-getAnywhere("cp2dpMv")
-getAnywhere("msn.cp2dp")
-# it seems understandable for now,
-# valid cps are
-# abs(gamma1) <  ~0.99
-# Omega_cor has to be inversible 
-
-## and this restriction seems to be harder to meet.
-# Obar.inv.delta <- as.vector(Obar.inv %*% delta)
-# delta.sq <- sum(delta * Obar.inv.delta)
-# if (delta.sq >= 1) {
-#   if (silent) 
-#     return(NULL)
-#   else stop("non-admissible CP")
-# }
-
-getAnywhere("sn.cp2dp")
-
-
-
-# Plotting a few asymmetric curves ----------------------------------------
-
-xmin <- -10
-xmax <- 10
-curve(skew_normal_lupdf(x, 0, 1, 7), from = xmin, to = xmax,
-      ylim = c(-10, 2), n = 500)
-abline(h = log(0.1))
-curve(skew_normal_lupdf(x, 1, 0.5, 0), add = TRUE, n = 500, col = "red")
-curve(skew_normal_lupdf(x, 0.0, 0.8, 4), add = TRUE, n = 500, col = "green")
-
-
-
-# Tomorrow: Multivariate versions -----------------------------------------
-
-
+# All works well there have been a few cases with a high asymmetry and 
+# constraining mu > log(0.1) where the posterior was bimodal. One mode fitted
+# perfectly, and the other fitted a symmetric curve that wasn't really so bad. 
+# A case like that could occur, but a closer look at the posterior could help 
+# to solve the problem.
