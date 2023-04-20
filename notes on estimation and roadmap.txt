@@ -195,7 +195,7 @@ Opciones:
     
     con 
     k_marg <- 6 # bases marginales
-    k_int <- 4  # bases de interacción
+    k_int <- 3  # bases de interacción
     d <- 9      # parametros de propagacion, tendremos
     d * k_marg + ncol(combn(9, 2)) * k_int # parámetros que estimar
     # 189
@@ -211,6 +211,8 @@ Opciones:
 TAREAS (2023-04-04):
 
 01 - Seguir con el código de filtrado de partículas. (mañana)
+     
+     Quizás un GAM se ajusta más rápido que un GP? Probar.
 
 02 - Comparar cómo los modelos ajustan a los datos:  (semana que viene)
      GAM, MVN, skew-MVN, skew-MV-student_t, GP.
@@ -233,9 +235,10 @@ TAREAS (2023-04-04):
      
      Number of parameters:
      d = 9
-     params = 
-     9 * 4 + # locations, scales, skewneses and kurtoses
-     ncol(combn(9, 2)) # correlations
-     # 72 :) 
+     (params = 
+     d * 3 +            # location, scale and slant vectors
+     1 +                # df (scalar),
+     ncol(combn(9, 2))) # correlations
+     # 64, biutiful
 
      initial values might arise from marginal and bidimensional computations.
