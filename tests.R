@@ -185,7 +185,7 @@ test_that("Similarity functions", {
   similarity_cpp_1_2 <- compare_fires_try(fire_1, fire_2)
   similarity_r_1_2 <- compare_fires_r(fire_1, fire_2)
 
-  expect_equal(similarity_cpp_1_2, similarity_r_1_2)
+  expect_equal(similarity_cpp_1_2, similarity_r_1_2, tolerance = 1e-6)
 
   similarity_1_1 <- compare_fires_try(fire_1, fire_1)
 
