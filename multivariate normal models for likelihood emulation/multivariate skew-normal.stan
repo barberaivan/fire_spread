@@ -1,0 +1,86 @@
+// multivariate skew-normal model
+functions {
+  
+  // Multivariate skew-normal log-density, with location vector xi,  
+  // vcov matrix Omega, and slant vector alpha.
+  // This function was optimized to decrease the looping computations.
+  // ones is rep_vector(1.0, rows(X)) used to repeat the xi and sigma vectors 
+  // in matrix form. It's passed as data to avoid creating it in every
+  // iteration.
+  vector multi_skew_normal_ld(data matrix X, data vector ones, row_vector xi, 
+                              matrix Omega, vector alpha) {
+    int N = rows(X); // X has cases in rows now
+    int K = cols(X);
+    vector[N] log_den;
+    vector[N] log_cum;
+    
+    // centred and scaled x
+    matrix[N, K] x_centred = X - ones * xi;
+    matrix[N, K] z = x_centred ./ (ones * sqrt(diagonal(Omega))'); 
+                                // just divides by sigma
+    
+    // Precision matrix
+    matrix[K, K] P = inverse_spd(Omega);
+    
+    // normal density
+    matrix[N, K] m_temp = x_centred * P; 
+    vector[N] Q = rows_dot_product(m_temp, x_centred);
+    log_den = -0.5 * Q;
+    
+    // cumulative probability
+    log_cum = log(Phi(z * alpha)); 
+    
+    // skew-log-density
+    return log(2) + log_den + log_cum;
+  }
+}
+
+data {
+  int<lower=0> N;
+  int<lower=0> K;
+  vector[N] y;
+  matrix[N, K] X; 
+  
+  real xi_prior_sd;
+  real sigma_prior_sd;
+  real sigma_prior_nu;
+  real alpha_prior_sd;
+  real tau_prior_sd;
+  real tau_prior_nu;
+  
+  real sigma_lower;
+}
+
+transformed data {
+  vector[N] ones = rep_vector(1.0, N);
+}
+
+parameters {
+  row_vector[K] xi;
+  vector<lower = sigma_lower>[K] sigma;
+  vector[K] alpha;
+  cholesky_factor_corr[K] Lcorr;
+  real<lower = 0> tau;
+}
+
+transformed parameters{
+  corr_matrix[K] Rho; 
+  cov_matrix[K] Omega;
+  vector[N] mu;
+
+  Rho = multiply_lower_tri_self_transpose(Lcorr); // = Lcorr * Lcorr'
+  Omega = quad_form_diag(Rho, sigma);             // = diag_matrix(sigma) * Rho * diag_matrix(sigma)
+  mu = multi_skew_normal_ld(X, ones, xi, Omega, alpha);
+}
+
+model {
+  // likelihood
+  y ~ normal(mu, tau);
+  
+  // priors
+  xi ~ normal(0, xi_prior_sd);
+  sigma ~ student_t(sigma_prior_nu, 0, sigma_prior_sd); // nu, mu, sigma
+  alpha ~ normal(0, alpha_prior_sd);
+  tau ~ student_t(tau_prior_nu, 0, tau_prior_sd);
+  Lcorr ~ lkj_corr_cholesky(1);
+}
