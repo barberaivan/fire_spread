@@ -4,11 +4,11 @@
 #include <vector>
 
 // armadillo used for the matrix representation of the rasters, to use the
-// cube data type.
+// fcube data type.
 
 // Useful armadillo links
 //   https://dcgerard.github.io/advancedr/08_cpp_armadillo.html
-//   https://arma.sourceforge.net/docs.html#subcube
+//   https://arma.sourceforge.net/docs.html#subfcube
 
 using namespace Rcpp;
 
@@ -23,8 +23,8 @@ using namespace Rcpp;
 // Constants ---------------------------------------------------------------
 
 // Elevation data to standardize predictor
-const double elevation_mean = 1163.3;
-const double elevation_sd = 399.5;
+const float elevation_mean = 1163.3;
+const float elevation_sd = 399.5;
 const int moves[8][2] = {
   {-1, -1},
   {-1,  0},
@@ -57,7 +57,7 @@ const int moves[8][2] = {
 // the direction from which the wind comes, these angles must represent where the
 // fire would come from if from the neighbours we look at the central pixel.
 
-const double angles[8] = {
+const float angles[8] = {
   M_PI * 3 / 4, M_PI, M_PI * 5 / 4,
       M_PI / 2,       M_PI * 3 / 2,
       M_PI / 4,    0, M_PI * 7 / 4
@@ -67,11 +67,11 @@ const double angles[8] = {
 
 //' @title spread_onepix_prob_cpp
 //' @description Calculates the probability of a cell spreading fire to another.
-//' @return double [0, 1] indicating the probability.
+//' @return float [0, 1] indicating the probability.
 //'
-//' @param arma::rowvec data_burning: environmental data from burning cell.
-//' @param arma::rowvec data_neighbour: environmental data from target neighbour.
-//' @param arma::rowvec coef: parameters in logistic regression to compute the
+//' @param arma::frowvec data_burning: environmental data from burning cell.
+//' @param arma::frowvec data_neighbour: environmental data from target neighbour.
+//' @param arma::frowvec coef: parameters in logistic regression to compute the
 //'   spread probability as a function of covariates. It has one more elements
 //'   than the columns of data_ because it includes the intercept.
 //' @param int position: relative position of the neighbour in relation to the
@@ -85,38 +85,38 @@ const double angles[8] = {
 //' @param int wind_column: column in the data (landscape) with wind value.
 //' @param int elev_column: column in the data (landscape) with elevation value.
 //'   Wind and elevation columns must be the last 2.
-//' @param double distances: distance (m) between burning and target cell. Used
+//' @param float distances: distance (m) between burning and target cell. Used
 //' to compute the elevation effect.
 //'   This vector depends on the neighbourhood design and on the pixel scale.
 //'   If unchanged, it's always the same.
-//' @param double upper_limit: upper limit for spread probability (setting to
+//' @param float upper_limit: upper limit for spread probability (setting to
 //'   1 makes absurdly large fires).
 
 // [[Rcpp::export]]
-double spread_onepix_prob_cpp(arma::rowvec data_burning,
-                           arma::rowvec data_neighbour,
-                           arma::rowvec coef,
+float spread_onepix_prob_cpp(arma::frowvec data_burning,
+                           arma::frowvec data_neighbour,
+                           arma::frowvec coef,
                            int position,
                            int wind_column,
                            int elev_column,
-                           double distance,
-                           double upper_limit = 1.0) {
+                           float distance,
+                           float upper_limit = 1.0) {
 
   // compute elevation, slope and wind effects
 
   // slope (from elevation)
-  double slope_term = sin(atan(
+  float slope_term = sinf(atanf(
     (data_neighbour(elev_column) - data_burning(elev_column)) / distance
   ));
 
   // wind term
-  double wind_term = cos(angles[position] - data_burning(wind_column));
+  float wind_term = cosf(angles[position] - data_burning(wind_column));
 
   // elevation term (standardize predictor)
-  double elev_term = (data_neighbour(elev_column) - elevation_mean) / elevation_sd;
+  float elev_term = (data_neighbour(elev_column) - elevation_mean) / elevation_sd;
 
   // compute probability
-  double linpred = coef[0]; // linear predictor, initialize as intercept.
+  float linpred = coef[0]; // linear predictor, initialize as intercept.
   // (the design matrix lacks the intercept column.)
   // All the effects besides elevation, slope and slope:
   for(int k = 0; k < (data_neighbour.size() - 2); k++) {
@@ -130,7 +130,7 @@ double spread_onepix_prob_cpp(arma::rowvec data_burning,
     elev_term * coef[elev_column + 1] +
     slope_term * coef[elev_column + 2]; // slope coef is after the elevation one
 
-  double prob = upper_limit / (1 + exp(-linpred));
+  float prob = upper_limit / (1 + expf(-linpred));
 
   return prob;
 }
@@ -140,16 +140,16 @@ double spread_onepix_prob_cpp(arma::rowvec data_burning,
 // The same but evaluating the probability (here for backwards compatibility)
 
 // [[Rcpp::export]]
-int spread_onepix_cpp(arma::rowvec data_burning,
-                      arma::rowvec data_neighbour,
-                      arma::rowvec coef,
+int spread_onepix_cpp(arma::frowvec data_burning,
+                      arma::frowvec data_neighbour,
+                      arma::frowvec coef,
                       int position,
                       int wind_column,
                       int elev_column,
-                      double distance,
-                      double upper_limit = 1.0) {
+                      float distance,
+                      float upper_limit = 1.0) {
 
-  double prob = spread_onepix_prob_cpp(
+  float prob = spread_onepix_prob_cpp(
     data_burning,
     data_neighbour,
     coef,
@@ -175,14 +175,14 @@ typedef struct _s_burned_res {
 // model coefficients and ignition points.
 
 burned_res simulate_fire_internal(
-    arma::cube landscape,
+    arma::fcube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
-    arma::rowvec coef,
+    arma::frowvec coef,
     int wind_layer,
     int elev_layer,
-    arma::rowvec distances,
-    double upper_limit = 1.0,
+    arma::frowvec distances,
+    float upper_limit = 1.0,
     double (*prob_fn)(double, double) = R::rbinom) {
 
   int n_row = burnable.nrow();
@@ -235,7 +235,7 @@ burned_res simulate_fire_internal(
     for(int b = start; b <= end; b++) {
 
       // Get burning_cells' data
-      arma::rowvec data_burning = landscape.tube(burned_ids(0, b), burned_ids(1, b));
+      arma::frowvec data_burning = landscape.tube(burned_ids(0, b), burned_ids(1, b));
 
       int neighbours[2][8];
       // get neighbours (adjacent computation here)
@@ -263,10 +263,10 @@ burned_res simulate_fire_internal(
         if(!burnable_cell) continue;
 
         // obtain data from the neighbour
-        arma::rowvec data_neighbour = landscape.tube(neighbours[0][n], neighbours[1][n]);
+        arma::frowvec data_neighbour = landscape.tube(neighbours[0][n], neighbours[1][n]);
 
         // simulate fire
-        double prob = spread_onepix_prob_cpp(
+        float prob = spread_onepix_prob_cpp(
           data_burning,
           data_neighbour,
           coef,
@@ -313,7 +313,7 @@ burned_res simulate_fire_internal(
 //'   This vector is converted from the burned layer (which is a matrix) by row,
 //'   as terra does.
 
-//' @param arma::cube landscape: environmental data from the whole landscape.
+//' @param arma::fcube landscape: environmental data from the whole landscape.
 //'   See description in spread_around. Every element in the list is a layer in
 //'   matrix representation, with rows and columns displayed as they are in the
 //'   landscape (not transposed!).
@@ -322,28 +322,28 @@ burned_res simulate_fire_internal(
 //'   the col_id.
 //' @param IntegerMatrix burnable: matrix indicating if each pixel is burnable (1)
 //'   or not (0).
-//' @param arma::rowvec coef: parameters in logistic regression to compute the
+//' @param arma::frowvec coef: parameters in logistic regression to compute the
 //'   spread probability as a function of covariates.
 //' @param int wind_layer: layer in the data (landscape) with wind matrix.
 //' @param int elev_layer: layer in the data (landscape) with elevation matrix.
 //'   Wind and elevation layers must be the last 2.
-//' @param arma::rowvec distances: distances (m) between burning and target cells,
+//' @param arma::frowvec distances: distances (m) between burning and target cells,
 //'   in the same order as positions. Used to compute the elevation effect.
 //'   This vector depends on the neighbourhood design and on the pixel scale.
 //'   If unchanged, it's always the same.
-//' @param double upper_limit: upper limit for spread probability (setting to
+//' @param float upper_limit: upper limit for spread probability (setting to
 //'   1 makes absurdly large fires).
 
 // [[Rcpp::export]]
 IntegerMatrix simulate_fire_cpp(
-    arma::cube landscape,
+    arma::fcube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
-    arma::rowvec coef,
+    arma::frowvec coef,
     int wind_layer,
     int elev_layer,
-    arma::rowvec distances,
-    double upper_limit) {
+    arma::frowvec distances,
+    float upper_limit) {
 
   return simulate_fire_internal(
     landscape,
@@ -365,14 +365,14 @@ IntegerMatrix simulate_fire_cpp(
 
 // [[Rcpp::export]]
 IntegerMatrix simulate_fire_deterministic_cpp(
-    arma::cube landscape,
+    arma::fcube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
-    arma::rowvec coef,
+    arma::frowvec coef,
     int wind_layer,
     int elev_layer,
-    arma::rowvec distances,
-    double upper_limit) {
+    arma::frowvec distances,
+    float upper_limit) {
   return simulate_fire_internal(
     landscape,
     ignition_cells,
@@ -401,14 +401,14 @@ typedef struct _s_burned_compare {
 // size by veg_type
 
 burned_compare simulate_fire_compare_cpp(
-    arma::cube landscape,
+    arma::fcube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
-    arma::rowvec coef,
+    arma::frowvec coef,
     int wind_layer,
     int elev_layer,
-    arma::rowvec distances,
-    double upper_limit) {
+    arma::frowvec distances,
+    float upper_limit) {
 
 
   burned_res burned_bin_ids = simulate_fire_internal(
@@ -443,14 +443,14 @@ burned_compare simulate_fire_compare_cpp(
 
 // [[Rcpp::export]]
 List simulate_fire_compare(
-    arma::cube landscape,
+    arma::fcube landscape,
     IntegerMatrix ignition_cells,
     IntegerMatrix burnable,
-    arma::rowvec coef,
+    arma::frowvec coef,
     int wind_layer,
     int elev_layer,
-    arma::rowvec distances,
-    double upper_limit) {
+    arma::frowvec distances,
+    float upper_limit) {
 
 
   burned_compare burned_com = simulate_fire_compare_cpp(
