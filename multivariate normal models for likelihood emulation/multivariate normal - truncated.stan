@@ -40,7 +40,7 @@ data {
   real tau_prior_nu;
   
   real sigma_lower;
-  real y_lower;
+  real L;
 }
 
 transformed data {
@@ -67,7 +67,7 @@ transformed parameters{
 model {
   // likelihood
   for(n in 1:N) 
-    y[n] ~ normal(mu[n], tau)T[y_lower, ];
+    y[n] ~ normal(mu[n], tau)T[L, ];
   
   // priors
   xi ~ normal(0, xi_prior_sd);

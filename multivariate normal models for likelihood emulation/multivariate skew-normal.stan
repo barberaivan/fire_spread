@@ -28,14 +28,20 @@ functions {
     log_den = -0.5 * Q;
     
     // cumulative probability
-    log_cum = log(Phi(z * alpha)); 
-    
+    log_cum = log(Phi(z * alpha)); // it's the same as normal_lcdf(x | 0, 1)
+                    
     // skew-log-density
     return log(2) + log_den + log_cum;
   }
 }
 
 data {
+  
+  // data to test phi
+  int N_seq;
+  vector[N_seq] xseq;
+  
+  
   int<lower=0> N;
   int<lower=0> K;
   vector[N] y;

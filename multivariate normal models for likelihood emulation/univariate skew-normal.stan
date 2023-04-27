@@ -12,7 +12,8 @@ functions{
     real prec = 1 / sigma ^ 2;
     
     vector[N] log_den = -0.5 * prec * x_centred .* x_centred; 
-    vector[N] log_cum = log(Phi(shifted)); 
+    vector[N] log_cum = normal_lcdf(shifted | 0, 1); //log(Phi(shifted));
+                      // change not tested
     
     return log(2) + log_den + log_cum;
   }
