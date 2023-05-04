@@ -1,4 +1,4 @@
-// multivariate skew-normal model
+// multivariate skew-normal model with truncated-normal likelihood
 functions {
   
   // Multivariate skew-normal log-density, with location vector xi,  
@@ -28,15 +28,14 @@ functions {
     log_den = -0.5 * Q;
     
     // cumulative probability
-    log_cum = log(Phi(z * alpha)); // it's the same as normal_lcdf(x | 0, 1)
-                    
+    log_cum = log(Phi(z * alpha)); 
+    
     // skew-log-density
     return log(2) + log_den + log_cum;
   }
 }
 
 data {
-  
   int<lower=0> N;
   int<lower=0> K;
   vector[N] y;
@@ -48,8 +47,10 @@ data {
   real alpha_prior_sd;
   real tau_prior_sd;
   real tau_prior_nu;
+  real b0_prior_sd;
   
   real sigma_lower;
+  real L;
 }
 
 transformed data {
@@ -62,6 +63,7 @@ parameters {
   vector[K] alpha;
   cholesky_factor_corr[K] Lcorr;
   real<lower = 0> tau;
+  real b0;
 }
 
 transformed parameters{
@@ -71,12 +73,13 @@ transformed parameters{
 
   Rho = multiply_lower_tri_self_transpose(Lcorr); // = Lcorr * Lcorr'
   Omega = quad_form_diag(Rho, sigma);             // = diag_matrix(sigma) * Rho * diag_matrix(sigma)
-  mu = multi_skew_normal_ld(X, ones, xi, Omega, alpha);
+  mu = b0 + multi_skew_normal_ld(X, ones, xi, Omega, alpha);
 }
 
 model {
   // likelihood
-  y ~ normal(mu, tau);
+  for(n in 1:N)
+    y[n] ~ normal(mu[n], tau)T[L, ];
   
   // priors
   xi ~ normal(0, xi_prior_sd);
@@ -84,4 +87,5 @@ model {
   alpha ~ normal(0, alpha_prior_sd);
   tau ~ student_t(tau_prior_nu, 0, tau_prior_sd);
   Lcorr ~ lkj_corr_cholesky(1);
+  b0 ~ normal(0, b0_prior_sd);
 }
