@@ -17,9 +17,8 @@ library(terra)
 library(tidyverse)
 
 # get paths
-data_path <- file.path("..", "fire_spread_data")
-gee_dir <- file.path(data_path, "focal fires data", "raw data from GEE")
-windninja_dir <- file.path(data_path, "focal fires data", "wind ninja files")
+gee_dir <- file.path("data", "focal fires data", "raw data from GEE")
+windninja_dir <- file.path("data", "focal fires data", "wind ninja files")
 
 
 # Export elevations -------------------------------------------------------
@@ -57,12 +56,12 @@ for(i in 1:length(fnames)) {
 # Import raw data, wind and fwi -------------------------------------------
 
 # import fire shapes to get year (for fwi matching)
-f <- vect(file.path(data_path, "patagonian_fires_spread.shp"))
+f <- vect(file.path("data", "patagonian_fires_spread.shp"))
 # _spread has the fires edited so every burned separate patch counts as a
 # separate fire, no matter whether they correspond to the same event or not.
 
 # fwi image
-fwi <- rast(file.path(data_path, "fwi_anomalies.tif"))
+fwi <- rast(file.path("data", "fwi_anomalies.tif"))
 crs(fwi) <- "EPSG:4326"
 
 fnames <- list.files(gee_dir)
@@ -222,7 +221,7 @@ object.size(lands) / 1e6 # 2634.7 Mb
 
 # Ignition points ---------------------------------------------------------
 
-points_raw <- vect(file.path(data_path, "ignition_points_checked.shp"))
+points_raw <- vect(file.path("data", "ignition_points_checked.shp"))
 points <- project(points_raw, raw_imgs[[1]])
 
 for(i in 1:n_fires) {
@@ -267,7 +266,7 @@ ccc # perfect (must be 2).
 
 # Save landscapes list ----------------------------------------------------
 
-saveRDS(lands, file.path(data_path, "landscapes_ig-known_non-steppe.rds"))
+saveRDS(lands, file.path("data", "landscapes_ig-known_non-steppe.rds"))
 
 
 

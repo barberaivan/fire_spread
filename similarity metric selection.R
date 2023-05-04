@@ -69,7 +69,7 @@ registerDoMC(n_cores)
 # Data and constants -----------------------------------------------------
 
 # landscape to run the simulations
-land_full <- readRDS(file.path("..", "fire_spread_data", "focal fires data",
+land_full <- readRDS(file.path("data", "focal fires data",
                                "landscapes_ig-known_non-steppe", "2015_53.rds"))
 land <- land_full$landscape
 
@@ -77,7 +77,7 @@ dnames <- dimnames(land)[[3]]
 
 # terra-raster of the same landscape (with elevation) for plotting purposes.
 # only the raster structure is needed, not its data.
-land_raster <- rast(file.path("..", "fire_spread_data", "focal fires data",
+land_raster <- rast(file.path("data", "focal fires data",
                               "wind ninja files", "2015_53.tif"))
 
 # constants for fire spread simulation

@@ -3,7 +3,7 @@
 library(terra)
 library(tidyverse)
 
-lands <- readRDS(file.path("..", "fire_spread_data", "landscapes_ig-known_non-steppe.rds"))
+lands <- readRDS(file.path("data", "landscapes_ig-known_non-steppe.rds"))
 
 mean_sd_rast <- function(arr) {
   fwi <- as.numeric(arr[, , "fwi"])

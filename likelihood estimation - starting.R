@@ -142,7 +142,7 @@ w0 <- prior_q(p)
 
 # Load fires data ---------------------------------------------------------
 
-fire_data <- readRDS(file.path("..", "fire_spread_data", "landscapes_ig-known_non-steppe.rds"))
+fire_data <- readRDS(file.path("data", "landscapes_ig-known_non-steppe.rds"))
 
 
 # Computing likelihood for the real data set ------------------------------

@@ -14,11 +14,11 @@ library(LaplacesDemon)
 sourceCpp("spread_functions.cpp")
 
 # landscapes for all fires
-lands <- readRDS(file.path("..", "fire_spread_data",
+lands <- readRDS(file.path("data",
                            "landscapes_ig-known_non-steppe.rds"))
 
 # cholila raster, to use the raster as template for plotting
-choli_raster <- rast(file.path("..", "fire_spread_data", "focal fires data",
+choli_raster <- rast(file.path("data", "focal fires data",
                                "data_cholila.tif"))
 
 
@@ -252,10 +252,10 @@ dnames <- dimnames(l)$layers
 # (time_end - time_start) # Time difference of 10.537 mins to simulate 100
 #                         # Time difference of 19.16281 mins to simulate 200
 
-# saveRDS(fire_sim, file.path("..", "fire_spread_data", "simulations", "fire_sim.rds"))
+# saveRDS(fire_sim, file.path("data", "simulations", "fire_sim.rds"))
 # save small subset for tests
-# saveRDS(fire_sim[1:10], file.path("..", "fire_spread_data", "simulations", "fire_sim_for_testing.rds"))
-fire_sim <- readRDS(file.path("..", "fire_spread_data", "simulations", "fire_sim.rds"))
+# saveRDS(fire_sim[1:10], file.path("data", "simulations", "fire_sim_for_testing.rds"))
+fire_sim <- readRDS(file.path("data", "simulations", "fire_sim.rds"))
 
 # Compare discrepancies ---------------------------------------------------
 
@@ -284,8 +284,8 @@ for(c in 1:(nsim-1)) {  ## this loop also takes long
     disc_arr[r, c, "dif_size"] <- abs(sizes[c] - sizes[r])
   }
 }
-saveRDS(disc_arr, file.path("..", "fire_spread_data", "simulations", "fire_sim_disc_arr.rds"))
-disc_arr <- readRDS(file.path("..", "fire_spread_data", "simulations", "fire_sim_disc_arr.rds"))
+saveRDS(disc_arr, file.path("data", "simulations", "fire_sim_disc_arr.rds"))
+disc_arr <- readRDS(file.path("data", "simulations", "fire_sim_disc_arr.rds"))
 
 
 

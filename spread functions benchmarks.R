@@ -14,11 +14,8 @@ sourceCpp("spread_functions.cpp")
 
 # Data preparation --------------------------------------------------------
 
-## the "fire_spread_data" folder must be located in the same directory as the fire_spread
-## repo is.
-
-land_path <- file.path("..", "fire_spread_data", "focal fires data", "data_cholila_landscape.rds")
-elev_path <- file.path("..", "fire_spread_data", "focal fires data", "data_cholila_elevation.tif")
+land_path <- file.path("data", "focal fires data", "data_cholila_landscape.rds")
+elev_path <- file.path("data", "focal fires data", "data_cholila_elevation.tif")
 
 # import landscape (cholila)
 land <- readRDS(land_path)
