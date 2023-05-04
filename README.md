@@ -12,17 +12,14 @@ We aim to include the fire spread model in a dynamic vegetation model that simul
 
 We defined the fire spread model representing the landscape with a lattice, as a cellular automata. Each bunable cell (i.e., not water, rock, or bare ground) can be not burned, burning of burned in every time step, and the burning state only lasts one step. The fire starts at an ignition point (cell) and spreads towards its 8-pixel neighbourhoood. The spread from fire i  to cell j ($y_{ij} \in \{0, 1\}$) follows a Bernoulli distribution with probability $p_{ij}$, defined as a linear function of the landscape covariates ($\boldsymbol{\text{X}}_{ij}$) and with an upper limit $u \in [0, 1]$:
 
-$
 \begin{aligned}
 y_{ij} &\sim \text{Bernoulli}(p_{ij})\\
 p_{ij} &= \frac{u}{1 + \exp(-\eta_{ij})} \\
 \eta_{ij} &= \alpha \ + \boldsymbol{\text{X}}_{ij} \boldsymbol{\beta }\\
 \end{aligned}
-$
 
 We fix $u = 0.5$ to avoid fires spreading through the whole landscape, and the estimation is aimed to find an approximate posterior distribution for $\boldsymbol{\beta}$. $\boldsymbol{\text{X}}_{ij}$ is a row vector from the design matrix, and its elements are:  
 
-$
 \begin{aligned}
 &\text{subalpine}_j \in \{0, 1\} \\
 &\text{wet}_j \in \{0, 1\} \\
@@ -33,11 +30,9 @@ $
 &\text{elevation}_{j} \in  (-\infty, \infty) \\
 &\text{slope}_{ij} \in [-1, 1] \\
 \end{aligned}
-$
 
 subalpine, wet and dry variables are dummies indicating the forest type. If all of them are zero, then the jth cell is shrubland, the reference category. FWI is the pixel-level anomaly in the summer-average daily values of the Fire Weather Index, intended to represent climatic interannual variability. Northing is computed as $\sin(\text{aspect}_j)$, taking 1 if the cell looks to the north and -1 if the cell looks to the south. wind takes 1 if the wind direction is the same as the direction from cell i to j, and -1 if it is exactly the opposite (**INSERT EQUATION HERE**). Elevation is the standardized elevation of pixel j, and slope is computed from the elevation of i and j and considering the distance between cells, taking 1 if the target cell is exactly above burning cell (impossible condition) and -1 if it is exactly below (**INSERT EQUATION HERE**). The first four elements in $\boldsymbol{\beta}$ lay in $(-\infty, \infty)$, but the remaining ones are constrained to reasonable regions of the parameter space to decrease the computation time and avoid non-sense estimations:
 
-$
 \begin{aligned}
 &\beta_{\text{FWI}} \in (0, \infty) \\
 &\beta_{\text{northing}} \in (0, \infty) \\
@@ -45,7 +40,6 @@ $
 &\beta_{\text{elevation}} \in  (-\infty, 0) \\
 &\beta_{\text{slope}} \in (0, \infty) \\
 \end{aligned}
-$
 
 In principle, one could choose the parameters values by eye (yes, by eye) to make a reasonable simulator, but serious people prefer to estimate them from data. The problem here is that the data about how real fires have spread pixel by pixel is not available (and, if possible, it would be really hard to get). So we cannot evaluate the likelihood of each fire transition. This takes us to likelihood-free methods. In our case, we know the likelihood function (derivable from eq. 1), but we do not have the data to compute it. An appealing solution is to use Approximate Bayesian Computation. This method replaces the likelihood function in the Bayes' theorem by a similarity measure between summaries of observed and simulated data. In our case, the summary of the (unobserved) spread data would be the final fire polygon and/or the number of pixels burned by vegetation type. Using this information we can compute a similarity measure between observed and simulated fire polygons $\rho(F_{\text{obs}}, F_{\text{sim}})$. As it is hard to know in advance which similarity function more suitable to emulate the likelihood, we test a few. The simplest is the spatial overlap, taking 1 if fires are exactly the same and 0 if they are disjoint (it cannot happen because they share at least the ignition point):
 
@@ -71,7 +65,6 @@ These three non-spatial metrics are averaged with the spatial overlap with weigh
 
     chequear orden en cpp
 
-$
 \begin{aligned}
 \rho_2(F_{\text{obs}}, F_{\text{sim}}) &= 0.75 \rho_1 + 0.25 nd \\
 \rho_3(F_{\text{obs}}, F_{\text{sim}}) &= 0.75 \rho_1 + 0.25 snd \\
@@ -81,7 +74,6 @@ $
 \rho_6(F_{\text{obs}}, F_{\text{sim}}) &= 0.5 \rho_1 + 0.5 snd \\
 \rho_7(F_{\text{obs}}, F_{\text{sim}}) &= 0.5 \rho_1 + 0.5 end \\
 \end{aligned}
-$
 
 [to be continued...]
 
