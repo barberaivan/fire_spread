@@ -21,8 +21,10 @@ typedef struct _s_compare_result {
 } compare_result;
 
 compare_result compare_fires_try_cpp(
-    burned_compare fire1, burned_compare fire2,
-    float lscale = 0.2) {
+    burned_compare fire1, 
+    burned_compare fire2,
+    float lscale = 0.2
+) {
 
   // Extract list elements ------------------------------------------------
 
@@ -200,31 +202,31 @@ NumericVector compare_fires_try(List fire1, List fire2,
 //' @return NumericMatrix(n_replicates, n_metrics): Matrix with each comparison
 //'   metric (columns) by simulated fire (rows)
 
-//' @param arma::fcube landscape: Environmental data from the whole landscape.
-//'   See description in spread_around. The 3rd dimension contains each layer
-//'   (covariates). The landscape is represented in matrix form.
+//' @param IntegerMatrix vegetation: integer matrix representing the vegetation 
+//'   type. 99 is non-burnable, and valid values are {0, ..., n_veg_types - 1}.
+//' @param arma::fcube terrain: terrain data, where each matrix slice is a 
+//'   predictor: {northing, elevation, wind direction}. Slope is absent
+//'   because it's directional, so it's computed during the simulation.
+//' @param int n_veg_types: integer indicating the number of vegetation types
+//'   considered by the model (not just those present in the focal landscape).
+//'   used to read properly the vegetation- and non-vegetation parameters in 
+//'   coef.  
+//'   
 //' @param IntegerMatrix ignition_cells(2, burning_cells): row and column id for
 //'   the cell(s) where the fire begun. First row has the row_id, second row has
 //'   the col_id.
-//' @param IntegerMatrix burnable: matrix indicating if each pixel is burnable (1)
-//'   or not (0).
 //' @param arma::frowvec coef: parameters in logistic regression to compute the
 //'   spread probability as a function of covariates.
-//' @param int wind_layer: layer in the data (landscape) with wind matrix.
-//' @param int elev_layer: layer in the data (landscape) with elevation matrix.
-//'   Wind and elevation layers must be the last 2.
-//' @param arma::frowvec distances: distances (m) between burning and target cells,
-//'   in the same order as positions. Used to compute the elevation effect.
-//'   This vector depends on the neighbourhood design and on the pixel scale.
 //' @param float upper_limit: upper limit for spread probability (setting to
 //'   1 makes absurdly large fires).
+//'   
 //' @param List fire_obs: Data of the observed (reference) fire. This has the
 //'   same elements as the result from simulate_fire_compare:
 //'     IntegerMatrix burned_layer: binary matrix storing (1) in burned pixels;
 //'     IntegerMatrix burned_ids: id in [row, col] of the burned cells. First
 //'       row hols the rows, second row holds the columns, and each column is
 //'       a pixel;
-//'     IntegerVector counts_veg: count of burned pixels by vegetation type.
+//'     NumericVector counts_veg: count of burned pixels by vegetation type.
 //'   The burned_layer is used to compute the spatial overlap index; the
 //'   burned_ids is used to evaluate the common burned pixels only in the smallest
 //'   of the fires, evaluating only those burned_ids; counts_veg is used to
@@ -233,15 +235,13 @@ NumericVector compare_fires_try(List fire1, List fire2,
 
 // [[Rcpp::export]]
 NumericMatrix emulate_loglik_try(
-    arma::fcube landscape,
+    IntegerMatrix vegetation,
+    arma::fcube terrain,
     IntegerMatrix ignition_cells,
-    IntegerMatrix burnable,
     arma::frowvec coef,
-    int wind_layer,
-    int elev_layer,
-    arma::frowvec distances,
-    float upper_limit,
     List fire_ref,
+    int n_veg_types = 6,
+    float upper_limit = 1.0,
     int n_replicates = 10
 ) {
 
@@ -266,13 +266,11 @@ NumericMatrix emulate_loglik_try(
 
     // simulate_fire
     List fire_sim = simulate_fire_compare(
-      landscape,
+      vegetation,
+      terrain,
       ignition_cells,
-      burnable,
       coef,
-      wind_layer,
-      elev_layer,
-      distances,
+      n_veg_types,
       upper_limit
     );
 

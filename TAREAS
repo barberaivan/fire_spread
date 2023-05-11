@@ -1,0 +1,89 @@
+-------------------------------- 2023-05-09 --------------------------------
+
+Los datos fueron modificados: 
+  * FWI es constante entre incendios (vuela de los paisajes y de los parámetros)
+  * elevation va estandarizada, y se tiene que estandarizar la distance para 
+    calcular la slope
+  * la vegetación es una integer matrix, codificando de 0 a k, con 
+    99 == non-burnable
+  
+  * incluir en los datos los 2 dry forests y la estepa. La reclasificación
+    se dará al asignar los mismos parámetros, por ejemplo, a shrubland y steppe.
+
+
+Editar código de prior predictive checks para que use los nuevos datos.
+# DONE, pero queda editar la parte en que explora las similarities.
+
+Editar similarity metric selection.R
+
+Hacer funciones para flexibilizar los códigos de vegetación.
+En muchos paisajes va a haber pocos vegetation types. Algunos estarán ausentes
+y otros serán tan poco abundantes que será sensato directamente asumirlos
+ausentes (pensar bien el criterio en base a su abundancia absoluta o relativa**).
+En ambos casos, la forma de "ignorarlos" es hacer que su intercept sea igual
+al de otra vegetation type. Entonces, necesitamos recodificar todas las veg
+types funcionalmente ausentes.
+
+Lo ideal sería indicar qué tipos de vegetación vas a considerar/usar, y que 
+en base a eso sepa cómo sinonimizar los demás. 
+Entonces, si voy a usar 
+  shrubland, dry_b
+la función debería convertir los demás parámetros de veg a estas clases, 
+siguiendo un orden de preferencia como la siguiente (chequear mirando análisis 
+de patrones):
+
+  shrubland: dry_b, steppe, dry_a, wet, subalpine;
+  subalpine: wet, dry_a, dry_b, shrubland, steppe;
+  wet:       subalpine, dry_a, dry_b, shrubland, steppe;
+  dry_a:     subalpine, wet, dry_b, shrubland, steppe;
+  dry_b:     shrubland, dry_a, wet, subalpine, steppe;
+  steppe:    shrubland, dry_b, dry_a, wet, subalpine;
+
+Ejemplo:
+si en un paisaje tengo solo
+  dry_a, 
+  steppe, 
+debería hacer estas conversiones:
+  subalpine: dry_a,
+  wet:       dry_a, 
+  dry_b:     dry_a
+  shrubland: steppe
+
+El vector de intercepts, cuyo orden es
+{shrubland, subalpine, wet, dry_a, dry_b, steppe}
+quedaría
+{steppe, dry_a, dry_a, dry_a, dry_a, steppe}
+
+** Criterio de escasez para ignorar veg types:
+- Area menor al 1% del paisaje quemable efectivo (es decir, descontando
+  islas de quemable no conectadas con el punto de ignición) 
+  OR
+- Área < 100 píxeles.
+
+Problemas de criterios areales: a veces un área muy pequeña puede tener 
+efectos importantes. 
+Ejemplo: el fuego empieza en un parchecito de subalpine, donde hay baja flamm.
+Se hace muy peque hasta extinguirse sin llegar al matorral. En cambio, 
+si empieza en matorral, aunque sea pequeño el parche, logra quemar un 
+número de píxeles suficientemente grande como para quemar el subalpine que 
+rodea al matorral.
+Si creemos que las condiciones iniciales son muy importantes, entonces esto 
+también debería definirse según la distancia al punto de ignición.
+  
+Antes de complicarme con esto, mejor evaluar bien cuántos veg_types hay por 
+paisaje y su abundancia relativa. Quizás es muy evidente si hace falta quitar 
+clases o no, y hasta podría hacerse a ojo.
+
+
+
+
+---- TAREAS PARA MÁS LUEGO
+
+- Elegir la métrica de similitud 
+- Volver a descargar todos los paisajes con las clases de vegetación completas
+  (dry forests separados), y hacer paisajes para R con las 6 clases (incluye
+  estepa).
+- Editar códigos de waves para que "ignore" los veg types ausentes o escasos.
+- Analizar en GEE la abundancia de cada veg type (6) en paisajes y en incendios,
+  para todos los fuegos (ig point known y unknown)
+  

@@ -5,13 +5,36 @@
 
 # Once the wind layers are created, the landscape arrays will be made as follows:
 
-#´   subalpine forest, {0, 1} (shrubland goes in the intercept)
-#´   wet forest,       {0, 1}
-#´   dry forest,       {0, 1}
-#´   fwi,              (-Inf, +Inf) (standardized anomaly at pixel level)
-#´   aspect            [-1, 1] # Northwestyness
-#´   wind direction    [-1, 1] (windward vs leeward)
-#´   elevation,        (standardized in the code)
+# the vegetation_type will be an integer matrix, with the following values:
+
+#   CLASS                        VALUE
+
+#´  shrubland                      0
+#´  subalpine forest               1
+#´  wet forest                     2
+#´  dry forest                     3
+
+#´  non-burnable                   99
+
+## IMPORTANT: the vegetation layer used here does not distinguish araucaria vs
+## cypress dry forests. To separate them, the download from GEE should be 
+## updated.
+
+
+# The following variables will be stored in a 3D array, with the following
+# layers:
+
+#´   aspect            [-1, 1] slope-weighted northing
+#´   wind direction    [-1, 1] windward vs leeward
+#´   elevation,        (standardized; mean = 1163.3 m, sd = 399.5)
+
+# (slope will be computed in the simulation, as it's a directional variable.)
+
+# The FWI, as an anomaly standardized at the pixel level, will be held constant
+# within each fire, taking its value at the ignition point. This variable will
+# model a fire-level random intercept, so it's not considered by the fire-spread
+# functions. 
+
 
 library(terra)
 library(tidyverse)
@@ -20,6 +43,12 @@ library(tidyverse)
 gee_dir <- file.path("data", "focal fires data", "raw data from GEE")
 windninja_dir <- file.path("data", "focal fires data", "wind ninja files")
 
+# elevation constants (to standardize variable)
+elev_mean <- 1163.3
+elev_sd <- 399.5
+
+# Number of vegetation types
+n_veg_types <- 4 # (shrubland, subalpine, wet, dry)
 
 # Export elevations -------------------------------------------------------
 
@@ -98,20 +127,12 @@ for(i in 1:length(wind_imgs)) {
 }
 
 
+# Import ignition points ---------------------------------------------------------
+
+points_raw <- vect(file.path("data", "ignition_points_checked.shp"))
+points <- project(points_raw, raw_imgs[[1]])
+
 # Make landscapes ---------------------------------------------------------
-
-
-# vegetation data
-#                                 class code
-# 1                        Non burnable    1
-# 2                    Subalpine forest    2
-# 3                          Wet forest    3
-# 4                          Dry forest    4
-# 5                           Shrubland    5
-# 6                           Grassland    6 (turn into shrubland)
-# 7 Anthropogenic prairie and shrubland    7 (turned into shrubland)
-# 8                          Plantation    8 (turned into dry forest)
-
 
 # get years
 fyears <- sapply(fire_ids, function(x) {
@@ -127,56 +148,66 @@ for(i in 1:n_fires) {
   # i = 1
 
   # every fire will be a list
-  elem_names <- c("landscape", "ig_rowcol",
-                  "burned_layer", "burned_ids", "counts_veg")
-  # landscape and ig_rowcol are used to simulate the fire, while the remaining
+  elem_names <- c("terrain", "vegetation",  "ig_rowcol", 
+                  "burned_layer", "burned_ids", 
+                  "counts_veg", "counts_veg_available",
+                  "fwi", "year", "fire_id")
+  # terrain and ig_rowcol are used to simulate the fire, while the remaining
   # elements are used to compare with simulated ones (these are the same outputs
   # from the fire simulation function).
 
-  lands[[i]] <- vector(mode = "list", length = 5)
+  lands[[i]] <- vector(mode = "list", length = length(elem_names))
   names(lands[[i]]) <- elem_names
-
+  lands[[i]]$year <- fyears[i] %>% unname
+  lands[[i]]$fire_id <- fire_ids[i]
+  
   # get raw image values
   v <- values(raw_imgs[[i]])
-
+  
   # vegetation
   veg_codes <- v[, "veg"]
   # replace nan with 1 (non burnable)
   veg_codes[is.nan(veg_codes)] <- 1
 
   # make veg matrix
-  veg_mat <- matrix(0, length(veg_codes), 3) # 3 cols for wet, subalpine, and dry forests
-  # shrubland is the reference
-  colnames(veg_mat) <- c("subalpine", "wet", "dry")
-
-  veg_mat[veg_codes == 2, 1] <- 1 # subalpine
-  veg_mat[veg_codes == 3, 2] <- 1 # wet
-  veg_mat[veg_codes == 4, 3] <- 1 # dry
-
-  # get fwi
-  fwi_local <- project(fwi[[as.character(fyears[i])]],
-                       raw_imgs[[i]],
-                       method = "cubicspline")
-  names(fwi_local) <- "fwi"
-
+  veg_vec <- integer(length(veg_codes)) 
+  
+  # vegetation data
+  #                                 class code
+  # 1                        Non burnable    1
+  # 2                    Subalpine forest    2
+  # 3                          Wet forest    3
+  # 4                          Dry forest    4
+  # 5                           Shrubland    5
+  # 6                           Grassland    6 (turned into shrubland)
+  # 7 Anthropogenic prairie and shrubland    7 (turned into shrubland)
+  # 8                          Plantation    8 (turned into dry forest B)
+  
+  veg_vec[veg_codes %in% c(5, 6, 7)] <- 0 # shrubland, to be explicit
+  veg_vec[veg_codes == 2] <- 1            # subalpine
+  veg_vec[veg_codes == 3] <- 2            # wet
+  veg_vec[veg_codes %in% c(4, 8)] <- 3    # dry
+  
+  veg_vec[veg_codes == 1] <- 99 # non-burnable
+  
   # project wind direction to match extent
   wind_local <- project(wind_imgs[[i]],
                         raw_imgs[[i]],
                         method = "cubicspline")
-  names(wind_local) <- "wind"
-
+  names(wind_local) <- "windir"
+  
+  # compute slope-weighted northing
+  # (see code <northing importance function.R>)
+  northing <- cos(v[, "aspect"] * pi / 180) * plogis(-5 + 0.35 * v[, "slope"])
+  
   # get landscape in matrix form
   land_long <- cbind(
-    veg_mat,
-    fwi = values(fwi_local),
-    aspect = cos(v[, "aspect"] * pi / 180), # northing
+    veg = veg_vec,
+    northing = northing, 
     windir = values(wind_local) * pi / 180, # in radians
-    elev = v[, "elev"],
-    burnable = v[, "burnable"],
+    elev = (v[, "elev"] - elev_mean) / elev_sd, # standardized
     burned = v[, "burned"]
   )
-  # Order matters. Wind and elevation must be the last data-layers,
-  # with burnable and burned in the end.
 
   # get landscape in array form
   land_arr <- array(
@@ -195,206 +226,127 @@ for(i in 1:n_fires) {
                               byrow = TRUE)
   } # terra gives raster values by row
 
-  # Fill landscape and burned_layer
-  lands[[i]]$landscape <- land_arr[, , 1:(ncol(land_long) - 1)] # without burned layer
-  lands[[i]]$burned_layer <- land_arr[, , ncol(land_long)]
+  # Fill terrain, vegetation matrix and burned_layer
+  lands[[i]]$terrain <- land_arr[, , c("northing", "windir", "elev")] 
+    # Order matters. Wind and elevation must be the last layers.
+  lands[[i]]$vegetation <- land_arr[, , "veg"]
+  lands[[i]]$burned_layer <- land_arr[, , "burned"]
 
   # compute burned_ids (with 0-indexing!)
   burned_cells <- which(v[, "burned"] == 1)
   # length(burned_cells) == sum(v[, "burned"])
   burned_rowcols <- rowColFromCell(raw_imgs[[i]], burned_cells)
+  colnames(burned_rowcols) <- c("row", "col")
   lands[[i]]$burned_ids <- t(burned_rowcols) - 1 # for 0-indexing!
 
-  # burned pixels by vegetation type
-  counts_veg <- numeric(4)
-  for(k in 2:4) counts_veg[k] <- sum(veg_mat[, (k-1)] * v[, "burned"]) # non-shrubland
-  counts_veg[1] <- sum(v[, "burned"]) - sum(counts_veg[2:4]) # the remaining is shrubland
-  # sum(counts_veg) == sum(v[, "burned"])
+  # pixels by vegetation type in available and burned
+  counts_veg <- integer(n_veg_types)
+  counts_veg_available <- integer(n_veg_types)
+  for(k in 1:n_veg_types) {
+    available <- as.numeric(veg_vec == (k-1))
+    counts_veg[k] <- sum(available * v[, "burned"]) 
+    counts_veg_available[k] <- sum(available)
+  }
+  
   lands[[i]]$counts_veg <- counts_veg
-}
-
-
-object.size(lands) / 1e6 # 2634.7 Mb
-# saveRDS(lands, "lands_temp.rds")
-# sapply(lands, class) %>% unique # OK
-
-
-# Ignition points ---------------------------------------------------------
-
-points_raw <- vect(file.path("data", "ignition_points_checked.shp"))
-points <- project(points_raw, raw_imgs[[1]])
-
-for(i in 1:n_fires) {
-  # i = 1
-
-  # subset ignition points
+  lands[[i]]$counts_veg_available <- counts_veg_available
+  
+  # get ignition points
   p_local <- points[points$Name == fire_ids[i]]
-
+  
   # get coordinates and row_col
   cc <- crds(p_local)
   ig_rowcol <- rbind(rowFromY(raw_imgs[[i]], cc[, "y"]),
                      colFromX(raw_imgs[[i]], cc[, "x"]))
   row.names(ig_rowcol) <- c("row", "col")
-
+  
   if(anyNA(ig_rowcol)) {
     stop(paste("Ignition point out of range,", "fire_id", fire_ids[i]))
   }
-
+  
   lands[[i]]$ig_rowcol <- ig_rowcol - 1 # 0-indexing!!!
+  
+  # get FWI values (mean, median and sd are used for additional analyses apart
+  # from model fittng)
+  fwi_local <- project(fwi[[as.character(fyears[i])]],
+                       raw_imgs[[i]],
+                       method = "cubicspline")
+  names(fwi_local) <- "fwi"
+  
+  fwi_vals <- values(fwi_local)
+  ig_cell <- cellFromRowCol(fwi_local, ig_rowcol["row", ], ig_rowcol["col", ])
+  fwi_data <- c("ig" = mean(fwi_vals[ig_cell]),
+                "mean" = mean(fwi_vals),
+                "median" = median(fwi_vals),
+                "sd" = sd(fwi_vals),
+                "min" = min(fwi_vals),
+                "max" = max(fwi_vals))
+  lands[[i]]$fwi <- fwi_data
 }
 
-
-# Check all ignition points fall in burned and burnable cells
+# Check all ignition points fall in burned and burnable cells,
+# and all burned cells are burnable.
 ccc <- numeric(n_fires)
+bbb <- numeric(n_fires)
 for(i in 1:n_fires) {
-  # i = 45
+  # i = 14
   ig <- lands[[i]]$ig_rowcol + 1 # because of 0-indexing
-
+  
   point_checks <- sapply(1:ncol(ig), function(c) {
-    cbind(lands[[i]]$landscape[ig[1, c], ig[2, c], "burnable"],
+    # c = 1
+    cbind(lands[[i]]$vegetation[ig[1, c], ig[2, c]] < 99, # 99 is non-burnable
           lands[[i]]$burned_layer[ig[1, c], ig[2, c]])
   }) %>% colSums %>% unique()
-
+  
   ccc[i] <- point_checks
-
+  
   if(point_checks != 2) {
     stop(paste("Ignition point problems,", "fire_id:", fire_ids[i], "i:", i))
   }
+  
+  # check burned is burnable
+  matches <- sum(lands[[i]]$burned_layer * (lands[[i]]$vegetation < 99))
+  bbb[i] <- sum(lands[[i]]$counts_veg) == matches
 }
-ccc # perfect (must be 2).
+all(ccc == 2) # OK?
+all(bbb == 1)
 
+# problem at one fire, i = 14, id = 2005_6:
+# row   50
+# col   48
+plot(raw_imgs[["2005_6"]][[c("veg", "burned")]])
+# from earth, it's evident it was burnable, all burned shrubland.
+bid_temp <- lands[["2005_6"]]$burned_ids + 1
+for(c in 1:ncol(bid_temp)) {
+  lands[["2005_6"]]$vegetation[bid_temp[1, c], bid_temp[2, c]] <- 0
+}
+# correct the counts_veg from this fix.
+for(k in 1:n_veg_types) {
+  available <- as.numeric(lands[["2005_6"]]$vegetation == (k-1))
+  lands[["2005_6"]]$counts_veg[k] <- sum(available * as.numeric(lands[["2005_6"]]$burned_layer)) 
+  lands[["2005_6"]]$counts_veg_available[k] <- sum(available)
+}
+
+object.size(lands) / 1e6 # 1472.3 Mb (before it was 2634.7 Mb, when fwi was not 
+                         # constant and veg was a matrix.
+# sapply(lands, class) %>% unique # OK
 
 # Save landscapes list ----------------------------------------------------
 
 saveRDS(lands, file.path("data", "landscapes_ig-known_non-steppe.rds"))
+# lands <- readRDS(file.path("data", "landscapes_ig-known_non-steppe.rds"))
 
-
-
-# OLD CODE BELOW, --------------------------------------------------------
-# used to make cholila and another fires before.
-
-# Cholila fire ------------------------------------------------------------
-
-land0 <- rast(paste(data_dir, "data_cholila.tif", sep = ""))
-elev <- rast(paste(data_dir, "data_cholila_elevation.tif", sep = ""))
-angles_90m <- rast(paste(data_dir, "data_cholila_elevation_284_10_90m_ang.asc", sep = ""))
-
-# interpolate windir to 30 m
-windir <- project(angles_90m, elev, method = "cubicspline")
-
-
-
-veg_codes <- values(land0$veg)
-unique(veg_codes)
-# replace nan with 1 (non burnable)
-veg_codes[is.nan(veg_codes)] <- 1
-
-veg_mat <- matrix(0, length(veg_codes), 3) # 3 cols for wet, subalpine, and dry forests
-                                            # shrubland is the reference
-colnames(veg_mat) <- c("subalpine", "wet", "dry")
-
-veg_mat[veg_codes == 3, 1] <- 1 # subalpine
-veg_mat[veg_codes == 3, 2] <- 1 # wet
-veg_mat[veg_codes == 4, 3] <- 1 # dry
-
-burnable <- as.numeric(veg_codes != 1)
-
-# make landscape
-land0_mat <- values(land0)
-colnames(land0_mat)
-
-# IMPORTANT: ADD BURNABLE AND BURNED LAYERS IN THE END
-
-landscape <- cbind(
-  veg_mat,
-  fwi = rep(0, nrow(land0_mat)),
-  aspect = cos(land0_mat[, "aspect"] * pi / 180), # northing
-  windir = values(windir)[, 1],
-  elev = land0_mat[, "elev"],
-  burnable = burnable,
-  burned = land0_mat[, "burned"]
-)
-
-head(landscape)
-dim(landscape)
-object.size(landscape) / 1e6
-
-sum(landscape[, "burnable"]) / nrow(landscape) # 68 % quemable
-
-# save cholila landscape
-
-saveRDS(landscape, paste(data_dir, "data_cholila_landscape.R", sep = ""))
-
-
-
-
-
-# 2021-865 landscape ------------------------------------------------------
-
-data_dir <- "/home/ivan/Insync/Fire spread modelling/data/focal fires data/"
-
-land0 <- rast(paste(data_dir, "data_2021_865.tif", sep = ""))
-# elev <- rast(paste(data_dir, "data_2021_865_elevation.tif", sep = ""))
-# angles_90m <- rast(paste(data_dir, "data_2021_865_elevation_284_10_90m_ang.asc", sep = ""))
-
-# interpolate windir to 30 m
-# windir <- project(angles_90m, elev, method = "cubicspline")
-
-# make vegetation data
-
-#                                 class code
-# 1                        Non burnable    1
-# 2                    Subalpine forest    2
-# 3                          Wet forest    3
-# 4                          Dry forest    4
-# 5                           Shrubland    5
-# 6                           Grassland    6 (turn into shrubland)
-# 7 Anthropogenic prairie and shrubland    7 (turned into shrubland)
-# 8                          Plantation    8 (turned into dry forest)
-
-veg_codes <- values(land0$veg)
-unique(veg_codes)
-# replace nan with 1 (non burnable)
-veg_codes[is.nan(veg_codes)] <- 1
-
-veg_mat <- matrix(0, length(veg_codes), 3) # 3 cols for wet, subalpine, and dry forests
-# shrubland is the reference
-colnames(veg_mat) <- c("subalpine", "wet", "dry")
-
-veg_mat[veg_codes == 3, 1] <- 1 # subalpine
-veg_mat[veg_codes == 3, 2] <- 1 # wet
-veg_mat[veg_codes == 4, 3] <- 1 # dry
-
-burnable <- as.numeric(veg_codes != 1)
-
-# make landscape
-land0_mat <- values(land0)
-colnames(land0_mat)
-
-# IMPORTANT: ADD BURNABLE AND BURNED LAYERS IN THE END
-
-landscape <- cbind(
-  veg_mat,
-  fwi = rep(0, nrow(land0_mat)),
-  aspect = rep(0, nrow(land0_mat)), #cos(land0_mat[, "aspect"] * pi / 180), # northing
-  windir = rep(0, nrow(land0_mat)), #values(windir)[, 1],
-  elev = land0_mat[, "elev"],
-  burnable = burnable,
-  burned = land0_mat[, "burned"]
-)
-
-head(landscape)
-dim(landscape)
-object.size(landscape) / 1e6
-
-sum(landscape[, "burnable"]) / nrow(landscape) # 84 % quemable
-
-# save 2021_865 landscape
-saveRDS(landscape, paste(data_dir, "data_2021_865_landscape.rds", sep = ""))
-
+# save each landscape separately
+for(i in 1:length(lands)) {
+  saveRDS(lands[[i]], file.path("data", "focal fires data",
+                                "landscapes_ig-known_non-steppe",
+                                paste(lands[[i]]$fire_id, ".rds", sep = "")))
+}
 
 
 # Export csv files to import them in C++ ----------------------------------
+
+## WARNING, the following code follows an outdated data structure.
 
 # File names are composed as <[FIRE_ID]-[OBJECT_NAME].csv>, and were produced
 # in the <landscapes_preparation.R> script. All files have column names. 

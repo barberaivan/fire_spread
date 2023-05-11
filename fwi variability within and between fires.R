@@ -5,16 +5,28 @@ library(tidyverse)
 
 lands <- readRDS(file.path("data", "landscapes_ig-known_non-steppe.rds"))
 
-mean_sd_rast <- function(arr) {
+# extract fwi information by fire
+get_fwi_info <- function(x) {
+
+  arr <- x$landscape
+  
   fwi <- as.numeric(arr[, , "fwi"])
   m <- mean(fwi)
   s <- sd(fwi)
-  a <- sum(as.numeric(arr[, , "burned"]))
-  return(c("mean" = m, "sd" = s, "area_pix" = a))
+  a <- sum(as.numeric(x$burned_layer))
+  
+  # fwi at ignition location
+  ig <- x$ig_rowcol %>% as.numeric
+  fwi_ig <- arr[ig[1], ig[2], "fwi"] %>% unname
+  
+  return(c("mean" = m, "median" = median(fwi), 
+           "fwi_ig" = fwi_ig,
+           "sd" = s, "area_pix" = a))
 }
 
-summs <- sapply(lands, mean_sd_rast) %>% t %>% as.data.frame
+summs <- sapply(lands, get_fwi_info) %>% t %>% as.data.frame
 
+# get year data
 years <- sapply(names(lands), function(n) {
   strsplit(n, "_")[[1]][1]
 }) %>% unname
@@ -24,6 +36,12 @@ years[years == "CoCampana"] <- "2002"
 summs$year <- as.numeric(years)
 summs$area_ha <- summs$area_pix * 0.09 # pixel is 30 * 30 m
 
+
+# Is the value at the ignition point similar to the mean and median in the 
+# landscape?
+
+p <- GGally::ggpairs(summs[, c("mean", "median", "fwi_ig")])
+ggsave("files/fwi_ignition-mean-median.png")
 
 # Plots of Fire size as a function of FWI
 
