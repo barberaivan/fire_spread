@@ -386,6 +386,151 @@ burned_res simulate_fire_internal(
   return {burned_bin, burned_ids, end};
 }
 
+// a similar function only returning a burned_layer with an integer by burn 
+// cycle, used to animate the spread.
+
+// [[Rcpp::export]]
+IntegerMatrix simulate_fire_animate(
+    IntegerMatrix vegetation,
+    arma::fcube terrain,
+    IntegerMatrix ignition_cells,
+    arma::frowvec coef,
+    int n_veg_types = 6,
+    float upper_limit = 1.0
+) {
+  
+  // separate vegetation and terrain coefficients
+  arma::frowvec coef_veg(n_veg_types);
+  arma::frowvec coef_terrain(4);
+  coef_veg = coef.subvec(0, n_veg_types - 1);
+  coef_terrain = coef.subvec(n_veg_types, coef.size() - 1);
+  
+  // define landscape dimensions
+  int n_row = vegetation.nrow();
+  int n_col = vegetation.ncol();
+  int n_cell = n_row * n_col;
+  
+  // burned_ids [row-col, cell] will be filled with the row_col ids (rows) of the
+  // burning pixels (columns). start and end integers will define the positions
+  // limits corresponding to the burning cells in every burn cycle.
+  IntegerMatrix burned_ids(2, n_cell); // check it's filled with 0 // -2147483648 is NA_INTEGER
+  
+  int start = 0;
+  // end is the last non-empty position in the burned_ids matrix.
+  int end = ignition_cells.ncol() - 1;
+  // Example:
+  // burned_ids = {231, 455, 342, 243, NA, NA, NA, NA};
+  //               start          end.
+  // if only one cell is burning, start = end.
+  
+  // initialize burned_ids and burning_size with ignition_cells
+  for(int c = 0; c <= end; c++) {
+    for(int r = 0; r < 2; r++) {
+      burned_ids(r, c) = ignition_cells(r, c);
+    }
+  }
+  
+  // initialize burning_size
+  int burning_size = ignition_cells.ncol(); // == end + 1 - start
+  
+  // The burned_step matrix will indicate the step at which each pixel was
+  // burned, starting from the ignition (there will always be at least a "1"
+  // pixel). Pixels with 0 are unburned.
+  IntegerMatrix burned_step(n_row, n_col);
+  
+  // initialize with ignition_cells
+  for(int i = 0; i <= end; i++) {
+    burned_step(ignition_cells(0, i), ignition_cells(1, i)) = 1;
+  }
+  
+  // initialize burning step
+  int step = 2;
+  
+  while(burning_size > 0) {
+    // Loop over all the burning cells to burn their neighbours. Use end_forward
+    // to update the last position in burned_ids within this loop, without
+    // compromising the loop's integrity.
+    int end_forward = end;
+    
+    // Loop over burning cells in the cycle
+    
+    // b is going to keep the position in burned_ids that have to be evaluated
+    // in this burn cycle
+    for(int b = start; b <= end; b++) {
+      
+      // Get burning_cell's data
+      arma::frowvec terrain_burning = terrain.tube(burned_ids(0, b), burned_ids(1, b));
+      
+      int neighbours[2][8];
+      // get neighbours (adjacent computation here)
+      for(int i = 0; i < 8; i++) {
+        neighbours[0][i] = burned_ids(0, b) + moves[i][0];
+        neighbours[1][i] = burned_ids(1, b) + moves[i][1];
+      }
+      
+      // Loop over neighbours of the focal burning cell
+      
+      for(int n = 0; n < 8; n++) {
+        
+        // Is the cell in range?
+        bool out_of_range = (
+          (neighbours[0][n] < 0) | (neighbours[0][n] >= n_row) | // check rows
+            (neighbours[1][n] < 0) | (neighbours[1][n] >= n_col)   // check cols
+        );
+        if(out_of_range) continue;
+        
+        // Get vegetation class to know whether the cell is burnable
+        int veg_target = vegetation(neighbours[0][n], neighbours[1][n]);
+        
+        // Is the cell burnable?
+        bool burnable_cell = 
+          (burned_step(neighbours[0][n], neighbours[1][n]) == 0) & // not burned
+          (veg_target < 99);                                      // burnable
+        if(!burnable_cell) continue;
+        
+        // obtain data from the neighbour
+        arma::frowvec terrain_neighbour = terrain.tube(neighbours[0][n], neighbours[1][n]);
+        
+        // simulate fire
+        float prob = spread_onepix_prob_cpp(
+          veg_target,
+          terrain_burning,
+          terrain_neighbour,
+          coef_veg,
+          coef_terrain,
+          n,           // position argument, from 0 to 7
+          upper_limit
+        );
+        
+        int burn = R::rbinom(1.0, prob);
+        if(burn == 0) continue;
+        
+        // If burned,
+        // store id of recently burned cell and
+        // set step in burned_step
+        // (but advance end_forward first)
+        end_forward += 1;
+        burned_ids(0, end_forward) = neighbours[0][n];
+        burned_ids(1, end_forward) = neighbours[1][n];
+        burned_step(neighbours[0][n], neighbours[1][n]) = step;
+        
+      } // end loop over neighbours of burning cell b
+      
+    } // end loop over burning cells from this cycle
+    
+    // update start and end
+    start = end + 1;
+    end = end_forward;
+    burning_size = end - start + 1;
+    
+    // update step
+    step += 1;
+    
+  } // end while
+  
+  return burned_step;
+} 
+
 // -----------------------------------------------------------------------
 
 // The same function to be exported to R, only returning the binary burned_bin
@@ -399,7 +544,6 @@ IntegerMatrix simulate_fire_cpp(
     int n_veg_types = 6,
     float upper_limit = 1.0
 ) {
-
   return simulate_fire_internal(
     vegetation,
     terrain,

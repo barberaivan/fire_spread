@@ -11,7 +11,7 @@ library(rstan)
 library(extraDistr)  # half t density (dht)
 library(DHARMa)
 library(mnormt) # for pd.solve
-library(trialr)
+library(trialr) # rlkjcorr
 library(truncnorm)  # check truncated models
 
 focal_folder <- "multivariate normal models for likelihood emulation"
