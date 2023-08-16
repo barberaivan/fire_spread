@@ -54,7 +54,7 @@ parameters {
   real<lower = 0> tau;
 }
 
-transformed parameters{
+transformed parameters {
   corr_matrix[K] Rho; 
   cov_matrix[K] Omega;
   vector[N] mu;

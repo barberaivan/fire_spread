@@ -47,7 +47,7 @@ hist(as.vector(land$vegetation))
 
 # All terrain is burnable
 mbm_all <- microbenchmark(
-  burns_all = {
+  burns_all_raw = {
     fire_all <- simulate_fire_cpp(
       terrain = land$terrain, 
       vegetation = vegetation_burn_all,
@@ -57,14 +57,32 @@ mbm_all <- microbenchmark(
       upper_limit = 1
     )
   },
-  times = 5
+  
+  burns_all_pak = {
+    fire_all <- FireSpread::simulate_fire(
+      terrain = land$terrain, 
+      vegetation = vegetation_burn_all,
+      ignition_cells = ig_location_mat - 1,
+      coef = coefs,
+      n_veg_types = n_veg_types,
+      upper_limit = 1
+    )
+  },
+  
+  times = 10
 )
-"With all terrain burnable"
 mbm_all
+# With all terrain burnable
+# Unit: seconds
+# expr      min       lq     mean   median       uq      max neval cld
+# burns_all_raw 1.724945 1.731835 1.757202 1.746229 1.759198 1.848571    10   b
+# burns_all_pak 1.488216 1.494799 1.502134 1.499918 1.509534 1.525945    10  a 
+1.494799 / 1.731835 # 0.86 
+
 
 # Only real burnable terrain is burnable
 mbm_real <- microbenchmark(
-  burns_plants = {
+  burns_plants_raw = {
     fire_real <- simulate_fire_cpp(
       terrain = land$terrain, 
       vegetation = land$vegetation,
@@ -74,23 +92,30 @@ mbm_real <- microbenchmark(
       upper_limit = 1
     )
   },
-  times = 5
+  
+  burns_plants_pak = {
+    fire_real <- FireSpread::simulate_fire(
+      terrain = land$terrain, 
+      vegetation = land$vegetation,
+      ignition_cells = ig_location_mat - 1,
+      coef = coefs,
+      n_veg_types = n_veg_types,
+      upper_limit = 1
+    )
+  },
+  
+  times = 50
 )
 
-"With only real burnable terrain"
 mbm_real
+# With only real burnable terrain
+# Unit: milliseconds
+# expr       min        lq     mean    median       uq      max neval cld
+# burns_plants_raw 1101.3957 1115.6209 1128.355 1123.6498 1136.985 1206.459    50   b
+# burns_plants_pak  972.1404  982.6578 1005.346  996.8097 1009.942 1198.779    50  a 
+982.6578 / 1101.3957
 
-# Unit: seconds
-
-# "With all terrain burnable"
-# > mbm_all
-# expr          min       lq     mean   median       uq      max    neval
-# burns_all 1.806337 1.809189 1.818991 1.811668 1.819008 1.848751     5
-
-# "With only real burnable terrain"
-# > mbm_real
-# expr            min       lq     mean   median       uq      max     neval
-# burns_plants 1.162128 1.169062 1.168091 1.169391 1.169741 1.170131     5
+# las optimizaciones con floats bajaron el tiempo en un factor de ~ 0.87
 
 # check:
 sum(as.vector(fire_all)) / ncell(land_raster)
@@ -104,7 +129,7 @@ sum(as.vector(fire_real)) / ncell(land_raster)
 
 # For the worst-timing particles in this landscape, simulating 10 fires in 1000 
 # particles would take approximately
-1.169391 * 10 * 1000 / 3600 # 3.248308 h
+0.9826578 * 10 * 1000 / 3600 # 2.72 h
 
 # If parallelized, assuming a reduction factor of 0.2, it would take
-1.169391 * 10 * 1000 * 0.2 / 60 # 38.9797 min
+0.9826578 * 10 * 1000 * 0.2 / 60 # 32.76 min

@@ -66,3 +66,9 @@ estandarizarla para que los intercepts sean más estimables.)
 Un hallazgo importante para eliminar veg_types en ciertos fuegos es que conviene
 parametrizar sin cat de referencia para disminuir la corr posterior cuando hay
 poca información sobre la categoría de referencia.
+
+
+
+## Lo más actualizado que pensé, considerando un gibbs sampler, está en 
+## Tareas e ideas.txt
+

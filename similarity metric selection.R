@@ -22,7 +22,7 @@
 
 # For every parameter vector (n_rep) and similarity metric (n_met = 7?) a 
 # Gaussian Process will be fitted in n_waves waves to emulate the likelihood 
-# function. 
+# function (n_waves = 5?). 
 # In this model we will exclude the FWI effect and use a fixed-intercept. 
 # After the last wave, we will obtain the MLE using optim (n_rep * n_met MLEs).
 # As for every parameter replicate (n_rep) there will be n_sim fires, the
@@ -30,7 +30,7 @@
 # and reference fire.
 
 # For each parameter separately we will compute the squared difference between
-# the real value and the posterior mean. We will choose the metric that
+# the real value and the MLE. We will choose the metric that
 # makes the smaller difference in most parameters, probably with a preference
 # for the simplest one (spatial overlap) if differences are small. 
 
@@ -45,12 +45,11 @@
 # and observed fires corresponding to a {parameter_vector, particle, metric} 
 # set.
 
-# TRY TO IMPLEMENT MEMOISED FUNCTION similarity_simulate_parallel(). If possible,
-# ignore the following:
-
-# From the second wave on, simulated fires by particle will be written to disk,
-# and when the particle is required, the fires will be loaded instead of 
-# simulated to compute the discrepancy metrics.
+# As simulations performed on certain particles will probably be required for
+# other parameter vectors and metrics, I save the results from every particle 
+# in a simulations_vault, which is written to disk as it becomes large. I
+# tried to use the memoise package, but it was not easy to save the result of
+# a parallelized function.
 
 # Packages ----------------------------------------------------------------
 
@@ -68,11 +67,8 @@ library(microbenchmark)
 
 library(foreach)       # parallelization
 library(doMC)          # doRNG had problems with cpp functions
-library(memoise)       # memoization of similarity_simulate_parallel
 
-sourceCpp("spread_functions.cpp")
-sourceCpp("similarity_functions.cpp")
-
+library(FireSpread)    # spread and similarity functions
 
 # Multicore settings -----------------------------------------------------
 
@@ -145,13 +141,78 @@ simulations_vault <- array(
 # to disk
 saved_with <- 0
 
+# formula for in_bounds model (gam)
+bounds_model_formula <- formula(
+  in_bounds ~ 
+    s(shrubland, k = 8, bs = "cr") + 
+    s(subalpine, k = 8, bs = "cr") + 
+    s(wet, k = 8, bs = "cr") +     
+    s(dry, k = 8, bs = "cr") + 
+    s(northing, k = 8, bs = "cr") +
+    s(elev, k = 8, bs = "cr") + 
+    s(wind, k = 8, bs = "cr") + 
+    s(slope, k = 8, bs = "cr")
+  )
+
+loglik_formula <- formula(
+  ll ~ 
+    # additive effects
+    s(shrubland, k = 7, bs = "cr") + 
+    s(subalpine, k = 7, bs = "cr") + 
+    s(wet, k = 7, bs = "cr") +     
+    s(dry, k = 7, bs = "cr") + 
+    s(northing, k = 7, bs = "cr") +
+    s(elev, k = 7, bs = "cr") + 
+    s(wind, k = 7, bs = "cr") + 
+    s(slope, k = 7, bs = "cr") + # this estimates 6 parameters (k-1)
+    
+    # interactions
+    ti(shrubland, subalpine, k = 3) + # this estimates 4 params (k-1)^2
+    ti(shrubland, wet, k = 3) +
+    ti(shrubland, dry, k = 3) +
+    ti(shrubland, northing, k = 3) +
+    ti(shrubland, elev, k = 3) +
+    ti(shrubland, wind, k = 3) +
+    ti(shrubland, slope, k = 3) +
+    
+    ti(subalpine, wet, k = 3) +
+    ti(subalpine, dry, k = 3) +
+    ti(subalpine, northing, k = 3) +
+    ti(subalpine, elev, k = 3) +
+    ti(subalpine, wind, k = 3) +
+    ti(subalpine, slope, k = 3) +
+    
+    ti(wet, dry, k = 3) +
+    ti(wet, northing, k = 3) +
+    ti(wet, elev, k = 3) +
+    ti(wet, wind, k = 3) +
+    ti(wet, slope, k = 3) +
+    
+    ti(dry, northing, k = 3) +
+    ti(dry, elev, k = 3) +
+    ti(dry, wind, k = 3) +
+    ti(dry, slope, k = 3) +
+    
+    ti(northing, elev, k = 3) +
+    ti(northing, wind, k = 3) +
+    ti(northing, slope, k = 3) +
+    
+    ti(elev, wind, k = 3) +
+    ti(elev, slope, k = 3) +
+    
+    ti(elev, wind, k = 3) +
+    ti(wind, slope, k = 3)
+)
+
+
+
 # Functions ---------------------------------------------------------------
 
 # prior simulator for graphical prior predictive checks
 prior_sim <- function(mu_int = 0, sd_int = 20, r_01 = 0.05, r_z = 0.15,
                       n_veg_types = 4) {
   
-  intercepts <- rnorm(n_veg_types, 0, sd_int)
+  intercepts <- rnorm(n_veg_types, mu_int, sd_int)
   names(intercepts) <- vegetation_names
   
   slopes <- c(
@@ -201,6 +262,17 @@ rast_from_mat <- function(m, fill_raster) { # fill_raster is a SpatRaster from t
   return(r)
 }
 
+# plot fires
+fire_plot <- function(burned_layer) {
+  mat <- vegetation
+  mat[,] <- 0
+  mat[vegetation < 99] <- 1
+  mat[burned_layer == 1] <- 2
+  plot_rast <- rast_from_mat(mat, land_raster)
+  plot(plot_rast, col = c("black", "forestgreen", "orange"),
+       type = "classes", levels = c("non-burnable", "unburned", "burned"))
+}
+
 # Function to simulate and plot a few fires to choose parameters that make sense
 # in the focal landscape.
 fire_prior_sim <- function(prior = NULL) {
@@ -209,7 +281,7 @@ fire_prior_sim <- function(prior = NULL) {
   par(mfrow = c(1, 3))
   
   for(i in 1:3) {
-    fire_prior <- simulate_fire_cpp(
+    fire_prior <- simulate_fire(
       terrain = terrain, 
       vegetation = vegetation,
       ignition_cells = ig_rowcol,
@@ -222,7 +294,7 @@ fire_prior_sim <- function(prior = NULL) {
     mat[,] <- 0
     mat[vegetation < 99] <- 1
     mat[fire_prior == 1] <- 2
-    plot_rast <- rast_from_mat(burnable_mat, land_raster)
+    plot_rast <- rast_from_mat(mat, land_raster)
     plot(plot_rast, col = c("black", "forestgreen", "orange"),
          type = "classes", levels = c("non-burnable", "unburned", "burned"),
          main = paste("mean intercept =", 
@@ -237,7 +309,8 @@ fire_prior_sim <- function(prior = NULL) {
 }
 
 # summarize with mean and variance
-summ_mean_var <- function(x) c("mean" = mean(x), "var" = var(x))
+summ_mean_var <- function(x) c("mean" = mean(x, na.rm = TRUE), 
+                               "var" = var(x, na.rm = TRUE))
 
 # Simulate similarity for a given particle on the set of observed fires.
 # Returns an array [n_rep, n_met, c("mean", "var")] with the similarity metrics 
@@ -272,7 +345,7 @@ similarity_simulate_particle <- function(particle, n_sim = 10) {
     )
     
     for(p in 1:n_rep) {  # loop over "real" parameter vectors
-      for(o in 1:n_sim) { # loop over "observed" fires
+      for(o in which(fires_use[, p])) { # loop over "observed" fires with decent size
         comp <- compare_fires_try(fire_sim, fires_real[[p]][[o]])
         
         # subset metrics to evaluate
@@ -294,7 +367,8 @@ similarity_simulate_particle <- function(particle, n_sim = 10) {
   
   # summarize mean and variance across observed fires for every parameter
   # replicate
-  metrics <- apply(met_meanvar, c("metric", "param_rep", "mean_var"), mean)
+  metrics <- apply(met_meanvar, c("metric", "param_rep", "mean_var"), mean, 
+                   na.rm = TRUE)
 
   return(metrics)
 }
@@ -366,14 +440,14 @@ similarity_simulate_memo <- function(
 }
 
 # extract_focal_loglik: function to extract similarity values from the 
-# simulations_vault array, subseting the parameters vector (rep_id) and 
+# simulations_vault array, subsetting the parameters vector (rep_id) and 
 # the desired metric(s). It merges this with the particles values, allowing
 # to fit a model to the similarity.
 # The variance and the size_diff are used only to filter out bounded particles.
 # Returns a df where each row is a particle, and with the following columns:
 #   ids: particle id,
 #   rep_id: id of the parameter vector that simulated the "observed" fires. 
-#   ll_mean: mean of the metric across the n_sim simulations (at logit scale!),
+#   ll: mean of the metric across the n_sim simulations (at logit scale!),
 #   var: variance of the metric across the n_sim simulations, at its original 
 #     scale,
 #   metric: name of the metric used.
@@ -417,7 +491,7 @@ extract_focal_loglik <- function(metrics_array, metric = "overlap_sp",
 
 # in_bounds: evaluate whether the particles are in_bounds, returning a binary
 # vector to fit in_bounds model.
-in_bounds <- function(data, rep_id, 
+in_bounds <- function(data, rep_id = 1, metric = "overlap_sp",
                       prop = 0.95, var_threshold = 0.15) {
   
   # # test
@@ -427,37 +501,36 @@ in_bounds <- function(data, rep_id,
   # ll_var_low = 0.1; prop = 0.95
   # # end testo
   
-  size_diff_max <- similarity_bounds["size_diff", rep_id, "largest"]
-  size_diff_min <- similarity_bounds["size_diff", rep_id, "smallest"]
+  size_diff_max <- similarity_bounds["size_diff", rep_id, "mean", "largest"]
+  size_diff_min <- similarity_bounds["size_diff", rep_id, "mean", "smallest"]
     
   size_diff_lower <- prop * size_diff_min
   size_diff_upper <- prop * size_diff_max
+  
+  # get variance in metric
+  low_var <- c(
+    similarity_bounds[metric, rep_id, "var", "largest"],
+    similarity_bounds[metric, rep_id, "var", "smallest"]
+  ) %>% max
     
   keep <- as.numeric(
     (
-      (data$size_diff_mean >= size_diff_lower) &  # size in bounds
-      (data$size_diff_mean <= size_diff_upper)
+      (data$size_diff >= size_diff_lower) &  # size in bounds
+      (data$size_diff <= size_diff_upper)
     ) & (
-      data$var >= var_threshold                # non-zero variance
+      data$var >= low_var * 10                # non-zero variance
     )
   )
   
-  return(as.numeric(filt))  
+  return(keep)  
 } 
 
 
 
-
-
-# fit the in_bounds model, specifying the data and a formula (default is 
-# s(intercept, k = 10))
+# fit the in_bounds model, specifying the data and a formula
 fit_in_bounds <- function(
     particles_data, 
-    form = formula(in_bounds ~ s(shrubland, k = 8) + 
-                     s(subalpine, k = 8) + 
-                     s(wet, k = 8) +     
-                     s(dry, k = 8))
-    
+    form = bounds_model_formula
 ) {
   
   data <- cbind(in_bounds = particles_data$in_bounds, 
@@ -468,7 +541,7 @@ fit_in_bounds <- function(
 }
 
 # function to simulate which particles are to be evaluated, based on the relative
-# probability of being in range.
+# probability of being in bounds.
 simulate_in_bounds <- function(in_model, particle_ids) {
   
   # get maximum fitted probability to relativize predictions.
@@ -486,16 +559,30 @@ simulate_in_bounds <- function(in_model, particle_ids) {
 
 # Simulate which particles are to be evaluated, based on the the 
 # probability of the loglik to be above a certain threshold, as predicted by the
-# gp model.
-simulate_high_loglik <- function(gp, particle_ids, 
-                                 loglik_threshold = logit(0.15)) {
+# loglik_model.
+simulate_high_loglik <- function(loglik_model, particle_ids, 
+                                 loglik_threshold = qlogis(0.15)) {
   
-  # predict
-  preds <- predict(gp, particles_all[particle_ids, ], se.compute = TRUE,
-                   type = "UK", light.return = TRUE)
+  ## TESTO
+  # particle_ids = 1:2000
+  # loglik_threshold = qlogis(0.03)
   
-  # get probability for x > loglik_threshold
-  prob <- 1 - pnorm(loglik_threshold, preds$mean, preds$sd)
+  if(any(class(loglik_model) == "km")) {
+    preds <- predict(loglik_model, particles_all[particle_ids, ], se.compute = TRUE,
+                     type = "UK", light.return = TRUE)
+    
+    # get probability for x > loglik_threshold
+    prob <- 1 - pnorm(loglik_threshold, preds$mean, preds$sd)
+  }
+  
+  if(any(class(loglik_model) == "gam")) {
+    nd <- as.data.frame(particles_all[particle_ids, ])
+    names(nd) <- par_names
+    mu <- predict(loglik_model, nd, type = "response")
+    ss <- loglik_model$scale %>% sqrt
+    # get probability for x > loglik_threshold
+    prob <- 1 - pnorm(loglik_threshold, mu, ss)
+  }
   
   # predict in_range_prob
   use_bin <- rbinom(length(prob), size = 1, prob = prob)
@@ -503,34 +590,64 @@ simulate_high_loglik <- function(gp, particle_ids,
   return(use_bin)
 }
 
-# Function to get more data passing given filters. 
+# Function to get more data passing bound and optionally loglik filters. 
 #   first, it predicts which particles are good based on the filtering, based
-#   on simulations according to the probability of the filters. Once n_pw 
+#   on simulations (bernoulli) according to the probability of the filtering
+#   models (bounds and loglik). Once n_pw 
 #   particles are selected, fires are simulated. 
 #   Once the data is available, it checks how many simulated particles have 
 #   actually passed the filters, and continues to simulate more particles until
-#   the good realized particles is over n_pw.
- 
-# filter: character vector indicating the filters to pass. if NULL, no filter 
-# is applied. "in_bounds" and/or "high_loglik" may be specified. 
-# for "in_bounds", the in_model is required, and the previous data is used
-# to find the maximum probability found at the moment in previous particles.
-# for "high_loglik", a gp model and a loglik threshold are required. 
- 
+#   the good realized particles is above n_pw.
+
+# loglik_filter determines whether the loglik model (gp) is used to filter new
+# particles in advance, by predicting their probability of high loglik before
+# simulating. This is useful to disable its use at the first waves, when many
+# particles are out of bounds and the gp is unstable, fitted with little data.
+# However, the search for new particles may count as useful only those above
+# a certain threshold. In that case, the GP is not used to predict good particles,
+# but only particles with high loglik are deemed as useful. Note that if 
+# gp_filter is TRUE, loglik_tolerance or loglik_lower (or both) must be provided.
+
 # returns a list, containing the new_data data.frame with the data of all 
 # simulated particles, and the id of the last tried particle. It may be larger
 # than the largest simulated particle.
 
+# Arguments
+# previous wave: result from loglik_update()
+# loglik_filter: whether to use or not a loglik model to choose new particles,
+# loglik_high: is so, a high loglik value to take as reference in accordance 
+#   to the loglik_tolerance.
+# loglik_lower: lower limit for good particles. It is usually set at a value
+#   that is above out-of-bounds particles.
+#   The likelihood criterion for particles to count as useful will be
+#   new_loglik >= loglik_threshold,
+#   loglik_threshold = max(loglik_high - loglik_tolerance, loglik_lower)
+# n_new: number of new useful particles to provide (checked after fires are
+#   simulated)
+# metric.
+# rep_id.
 
-# SEGUIR POR ACÁ ----------------------------------------------------------
-# testear more_data y loglik_update. Por las dudas, también revisar los plots
+
+# EDITAR ACÁ --------------------------------------------------------------
+# Evitar que simule hasta encontrar todas cosas válidas.
+# ser más laxo, como antes. buscar n_pw partículas buenas a priori, simularlas,
+# y devolver, aunque no todas sean efectivamente buenas.
+
 
 more_data <- function(previous_wave = NULL,
+                      loglik_filter = TRUE,
+                      loglik_high = NULL,
                       loglik_tolerance = NULL,
                       loglik_lower = NULL,
-                      n_new = 500,
+                      n_new = 1000,
                       metric = "overlap_sp",
                       rep_id = 1) {
+  
+  # override metric and rep_id if there is a previous_wave
+  if(!is.null(previous_wave)) {
+    metric <- previous_wave$metric
+    rep_id <- previous_wave$rep_id
+  }
   
   # is this the first wave?
   first_wave <- is.null(previous_wave)
@@ -548,29 +665,29 @@ more_data <- function(previous_wave = NULL,
   # if there are previous waves, it's not so easy...
   } else {
     
-    # check we have a likelihood criterion
-    if(is.null(loglik_lower) & is.null(loglik_tolerance)) {
-      stop("No likelihood criterion was provided.")
+    # define likelihood-based threshold for counting particles
+    relative_lower <- if(is.null(loglik_tolerance) | is.null(loglik_high)) NULL else {
+      loglik_high - loglik_tolerance
+    } 
+      
+    loglik_threshold <- if(is.null(relative_lower) & is.null(loglik_lower)) NULL else {
+      max(relative_lower, loglik_lower)
+    }
+    
+    if(loglik_filter & is.null(loglik_threshold)) {
+      stop("A loglik criterion is needed to pre-filter particles with a loglik model.")
     }
     
     # extract models to filter particles
-    gp <- previous_wave$gp
+    loglik_model <- previous_wave$loglik_model
     in_model <- previous_wave$in_model
-    
-    # define likelihood_threshold
-    if(!is.null(loglik_tolerance)) {
-      model_lower <- previous_wave$loglik_max_fitted - loglik_tolerance
-    } else {
-      model_lower <- NULL
-    }
-    
-    loglik_threshold <- max(model_lower, loglik_lower)
     
     # initialize number of added particles and data.
     added <- 0       # new useful particles counter
     new_data <- NULL # new data with all the new simulated particles
-                     # (will be larger than n_new because n_new counts the 
+                     # (may be larger than n_new because n_new counts the 
                      # useful ones after they are simulated)
+    last_particle <- previous_wave$last_particle
     
     while(added < n_new) {
       
@@ -585,11 +702,13 @@ more_data <- function(previous_wave = NULL,
       }
       
       # simulate filters pass
-      use_ll <- simulate_high_loglik(gp, try_ids, loglik_threshold)
-      use_in <- simulate_in_bounds(in_model, particle_ids)
+      use_ll <- ifelse(loglik_filter, 
+                       simulate_high_loglik(loglik_model, try_ids, loglik_threshold),
+                       rep(1, length(try_ids)))
+      use_in <- simulate_in_bounds(in_model, try_ids)
       use <- use_ll * use_in
       
-      # simulate fire in particles that passed
+      # simulate fire in particles that passed the pre-simulation filters
       if(sum(use) > 0) {
         
         try_sim <- try_ids[use == 1]
@@ -601,7 +720,11 @@ more_data <- function(previous_wave = NULL,
         )
         
         # count how many particles actually passed the filters
-        high_ll <- as.numeric(new_data_forward$ll >= loglik_threshold)
+        high_ll <- ifelse( # determines whether loglik is used to judge simulated particles
+          !is.null(loglik_threshold),
+          as.numeric(new_data_forward$ll >= loglik_threshold),
+          rep(1, length(try_ids))
+        )
         inside <- in_bounds(new_data_forward)
         added <- added + sum(high_ll * inside)
         
@@ -616,25 +739,26 @@ more_data <- function(previous_wave = NULL,
   }
 }
 
+# Functions used to find the maximum of a GAM or a GP
+gam_predict <- function(x, loglik_model) {
+  nd <- as.data.frame(matrix(x, nrow = 1))
+  names(nd) <- par_names
+  return(predict(loglik_model, nd, type = "response"))
+}
 
-# loglik_update runs a wave of gp-fitting.
+gp_predict <- function(x, loglik_model) {
+  predict(loglik_model, type = "UK", se.compute = F, light.return = TRUE,
+          newdata = matrix(x, nrow = 1))$mean
+}
 
-# Arguments
-
-# previous_wave: list generated in the previous wave (default is NULL, which 
-#   behaves accordingly for the first wave),
-# loglik_tolerance: new particles will be judged as good if they have high
-#   probability of being > (loglik_max_fitted - loglik_tolerance)
-# loglik_lower: alternatively, the particles are jugded as good if they are
-#   > loglik_lower. If present, the loglik_threshold is the maximum between
-#   (loglik_max_fitted - loglik_tolerance) and loglik_lower,
-# n_pw: number of new good particles to include in the new wave,
-# metric: similarity metric,
-# rep_id: parameter vector id of the fires evaluated.
+# loglik_update runs a wave of likelihood emulator fitting.
 
 # returns
-
-# gp: Gaussian process fitted in the previous step.
+# loglik_model: likelihood model fitted in the previous step.
+# in_model: gam model predicting the probability of particles laying in_bounds.
+# loglik_max_obs, _fitted, and _optim: high loglik values to use as benchmarks
+#   for selecting more particles in the following wave.
+# params_max_optim: parameter values reaching loglik_max_optim.
 # particles_data: data.frame with the following columns
 #   ids: particle id,
 #   rep_id: parameter vector id that originated the "observed" fires analysed,
@@ -642,21 +766,74 @@ more_data <- function(previous_wave = NULL,
 #   ll: logit of the mean of the simulated likelihoods in each particle,
 #   var: variance of the simulated likelihoods in each particle,
 #   parameter_values: matrix with the parameter values.
-#   in_bounds: integer [0, 1] indicating if the particles are in_bounds,
-loglik_update <- function(previous_wave = NULL,
-                          # list from the previous wave
+#   in_bounds: integer [0, 1] indicating if the particles are in_bounds.
+# metric: metric to emulate likelihood being evaluated.
+# rep_id: id for the real parameter vector to be estimated.
+
+# arguments
+# previous_wave: list generated in the previous wave (default is NULL, which 
+#   starts the estimation process),
+# model_filter: see more_data() (old gp_filter)
+# loglik_high: a high value of loglik to take as reference to judge particles.
+#   It might be a number or "max_fitted", "max_observed", or "max_estimated".
+# loglik_tolerance: new particles will be judged as good if they have high
+#   probability of being > (loglik_high - loglik_tolerance)
+# loglik_lower: alternatively, the particles are jugded as good if they are
+#   > loglik_lower. If present, the loglik_threshold is the maximum between
+#   (loglik_high - loglik_tolerance) and loglik_lower,
+# n_pw: number of new good particles to include in the new wave,
+# fit_ll_model: whether to fit a loglik model or not. It is convenient to wait 
+#   until many many simulations in bounds are available (maybe fit it in the 
+#   second wave?).
+# fit_ll_bounded: use only particles in_bounds to fit the loglik model,
+# ll_model = c("gam", "gp")
+# ll_model_optimize = should the fitted loglik model be optimized? Not recommended
+#   if it's first fitted with many particles out of bounds.
+# # metric: similarity metric,
+# rep_id: parameter vector id of the fires evaluated.
+
+loglik_update <- function(previous_wave = NULL, 
+                          loglik_filter = TRUE,
+                          loglik_high = NULL,
                           loglik_tolerance = 3,
                           loglik_lower = NULL,
-                          n_pw = 1500, 
+                          n_pw = 3000, 
+                          fit_ll_model = TRUE,
+                          fit_ll_bounded = TRUE,
+                          ll_model = "gam",
+                          ll_model_optimize = FALSE,
                           metric = "overlap_sp", 
                           rep_id = 1) {
+  
+  ### TESTO
+  previous_wave = result#NULL 
+  loglik_filter = T
+  loglik_high = result$loglik_max_obs
+  loglik_tolerance = 1
+  loglik_lower = NULL
+  n_pw = 1000
+  fit_ll_model = TRUE
+  fit_ll_bounded = T
+  ll_model = "gam"
+  ll_model_optimize = FALSE
+  metric = "overlap_sp" 
+  rep_id = 1
+  ### TESTO ENDO
+  
+  # override metric and rep_id if there is a previous_wave
+  if(!is.null(previous_wave)) {
+    metric <- previous_wave$metric
+    rep_id <- previous_wave$rep_id
+  }
   
   # Simulate new particles
   print("Getting more data (simulating fires)")
   fresh_ones <- more_data(
     previous_wave = previous_wave,
-    loglik_tolerance = 3,
-    loglik_threshold = loglik_lower,
+    loglik_filter = loglik_filter,
+    loglik_high = loglik_high,
+    loglik_tolerance = loglik_tolerance,
+    loglik_lower = loglik_lower,
     n_new = n_pw,
     metric = metric,
     rep_id = rep_id
@@ -672,60 +849,88 @@ loglik_update <- function(previous_wave = NULL,
   particles_data_new$wave <- this_wave
   
   # define in_bounds particles (binary)
-  particles_data_new$in_bounds <- in_bounds(particles_data_new)
+  particles_data_new$in_bounds <- in_bounds(particles_data_new,
+                                            rep_id = rep_id,
+                                            metric = metric)
   
   # merge old and new particles data
   if (is.null(previous_wave)) {
     particles_data_join <- particles_data_new
   } else {
-    particles_data_join <- rbind(particles_data, particles_data_new)
+    particles_data_join <- rbind(previous_wave$particles_data, 
+                                 particles_data_new)
   }
-
+  
   # fit or update in_bounds_model using all the data
   in_model <- fit_in_bounds(particles_data_join)
   
-  # fit gp using only in_bounds observations
-  fit_this <- which(particles_data_join$in_bounds == 1)
-  
-  print("Fitting GP")
-  gp_new <- km(design = particles_data_join$par_values[fit_this, ], 
-               response = particles_data_join$ll[fit_this], 
-               nugget.estim = TRUE,
-               multistart = n_cores,
-               control = list(maxiter = 5e4))
-
-  # compute loglik_max_fitted
-  fitted <- predict(gp_new, type = "UK",
-                    newdata = particles_data_join$par_values[fit_this, ],
-                    se.compute = TRUE, light.return = TRUE)
-
-  loglik_max_fitted <- max(fitted$mean)
-  
-  # get fitted mle
-  id_fitted <- particles_data_join$particle_id[fit_this]
-  id_max <- id_fitted[which.max(fitted$mean)]
-  id_filter <- particles_data_join$particle_id == id_max
-  par_max_fitted <- particles_data_join$par_values[id_filter, ]
-  
-  # optimize the GP
-  op <- optim(par_max_fitted, fn = function(x) {
-    predict(gp_new, type = "UK", se.compute = F, light.return = TRUE,
-            newdata = matrix(x, nrow = 1))$mean
-    }, control = list(fn_scale = -1))
+  if(fit_ll_model) {
+    # filter (or not) in_bounds particles to fit model
+    fit_this <- if(fit_ll_bounded) {
+      which(particles_data_join$in_bounds == 1)
+    } else 1:nrow(particles_data_join)
+    
+    print(paste("Fitting", ll_model))
+    
+    if(ll_model == "gam") {
+      data_gam <- cbind(ll = particles_data_join$ll[fit_this],
+                        as.data.frame(particles_data_join$par_values[fit_this, ])) %>% as.data.frame
+      loglik_model <- gam(loglik_formula, data = data_gam, method = "REML")
+      
+      fitted_ll <- fitted(loglik_model)
+    }
+    
+    if(ll_model == "gp") {
+      loglik_model <- km(design = particles_data_join$par_values[fit_this, ], 
+                         response = particles_data_join$ll[fit_this], 
+                         nugget.estim = TRUE,
+                         multistart = ceiling(n_cores / 2),
+                         control = list(maxiter = 5e4))
+      
+      # max fitted value
+      fitted_ll <- predict(loglik_model, type = "UK",
+                           newdata = particles_data_join$par_values[fit_this, ],
+                           se.compute = TRUE, light.return = TRUE)$mean
+    }
+    
+    # max fitted loglik value
+    loglik_max_fitted <- max(fitted_ll)
+    
+    # max fitted parameters value
+    id_fitted <- particles_data_join$particle_id[fit_this]
+    id_max <- id_fitted[which.max(fitted_ll)]
+    id_filter <- which(particles_data_join$particle_id == id_max)
+    params_max_fitted <- particles_data_join$par_values[id_filter, ]
+    
+    if(ll_model_optimize) {
+      obj_fun <- if(ll_model == "gam") gam_predict else gp_predict
+      
+      lowers <- apply(particles_data_join$par_values[fit_this, ], 2, min)
+      uppers <- apply(particles_data_join$par_values[fit_this, ], 2, max) 
+      
+      op <- optim(params_max_fitted, obj_fun, loglik_model = loglik_model,
+                  control = list(fnscale = -1, maxit = 1e5),
+                  method = "L-BFGS-B", lower = lowers, upper = uppers)  
+    }
+  }
   
   # put all together
-  result <- list(gp = gp_new,
-                 loglik_max_fitted = loglik_max_fitted,
-                 loglik_max_optim = op$value,
-                 mle = op$par,
-                 particles_data = particles_data_join,
-                 last_particle = fresh_ones$last_particle)
+  result <- list(
+    loglik_model = if(fit_ll_model) loglik_model else NULL,
+    in_model = in_model,
+    loglik_max_obs = max(particles_data_join$ll),
+    loglik_max_fitted = if(fit_ll_model) loglik_max_fitted else NULL,
+    loglik_max_optim = if(fit_ll_model & ll_model_optimize) op$value else NULL,
+    loglik_optim = if(ll_model_optimize) op else NULL,
+    params_max_optim = if(fit_ll_model & ll_model_optimize) op$par else NULL,
+    particles_data = particles_data_join,
+    last_particle = fresh_ones$last_particle,
+    metric = metric,
+    rep_id = rep_id
+  )
   
   return(result)
-}  
-
-
-
+}
 
 
 # function to make new data varying only one predictor.
@@ -773,48 +978,76 @@ make_newdata <- function(varying = "shrubland", data, mle = NULL) {
 
 
 # partial predictor function
-partial_predictions <- function(varying = "shrubland", data, gp, mle) {
+partial_predictions <- function(varying = "shrubland", data, loglik_model, mle) {
   
   ### TEST
-  # varying = "all"; data = w1$particles_data; gp = w1$gps[[length(w1$gps)]]
-  # mle = mle
+  # varying = "shrubland" 
+  # data = data_pred 
+  # loglik_model = loglik_model; mle = fitting_wave$loglik_max_optim
   ### 
   
   if(varying != "all") {
     new_data <- make_newdata(varying = varying, data = data, mle = mle)
-    pred <- predict(gp, newdata = new_data[, par_names], type = "UK",
-                    light.return = TRUE, se.compute = TRUE)
     
-    new_data$mle <- pred$mean
-    new_data$upper <- pred$upper95
-    new_data$lower <- pred$lower95
+    if(any(class(loglik_model) == "km")) {
+      pred <- predict(loglik_model, newdata = new_data[, par_names], type = "UK",
+                      light.return = TRUE, se.compute = TRUE)
+      
+      new_data$mle <- pred$mean
+      new_data$upper <- pred$upper95
+      new_data$lower <- pred$lower95
+    }
+    
+    if(any(class(loglik_model) == "gam")) {
+      pred <- predict(loglik_model, newdata = new_data[, par_names],
+                      se.fit = TRUE)
+      
+      new_data$mle <- pred$fit
+      new_data$upper <- pred$fit + qnorm(0.975) * pred$se.fit
+      new_data$lower <- pred$fit - qnorm(0.975) * pred$se.fit
+    }
+    
+    
   } else {
     new_data <- do.call("rbind", lapply(par_names, function(x) {
       make_newdata(varying = x, data = data, mle = mle)
     }))
     
-    pred <- predict(gp, newdata = new_data[, par_names], type = "UK",
-                    light.return = TRUE, se.compute = TRUE)
-    new_data$mle <- pred$mean
-    new_data$upper <- pred$upper95
-    new_data$lower <- pred$lower95
+    if(any(class(loglik_model) == "km")) {
+      pred <- predict(loglik_model, newdata = new_data[, par_names], type = "UK",
+                      light.return = TRUE, se.compute = TRUE)
+      
+      new_data$mle <- pred$mean
+      new_data$upper <- pred$upper95
+      new_data$lower <- pred$lower95
+    }
+    
+    if(any(class(loglik_model) == "gam")) {
+      pred <- predict(loglik_model, newdata = new_data[, par_names],
+                      se.fit = TRUE)
+      
+      new_data$mle <- pred$fit
+      new_data$upper <- pred$fit + qnorm(0.975) * pred$se.fit
+      new_data$lower <- pred$fit - qnorm(0.975) * pred$se.fit
+    }
   }
   
   return(new_data)
 }
 
-# gp_plot: function to explore the advance of the gp.
-gp_plot <- function(fitting_wave, 
-                    varying = "intercept", # parameter to vary in the 1d plot 
-                    fixed_at = "mean", # fix the not-varying parameters at mean or mle
-                    filter_bounds = TRUE) { 
+# loglik_plot: function to explore the advance of the gp.
+loglik_plot <- function(fitting_wave, 
+                        varying = "shrubland", # parameter to vary in the 1d plot 
+                        color_point = c("wave", "in_bounds"),
+                        latest_wave = FALSE) { 
   
   #### TEST
-  # fitting_wave <- w1; varying = "intercept"; fixed_at = "mean"
-  # varying = "all"; local_range = FALSE
+  # fitting_wave <- result; varying = "all"
+  # color_point <- "wave_plot"
+  # latest_wave <- F
   #### 
   
-  gp <- fitting_wave$gp
+  loglik_model <- fitting_wave$loglik_model
   data <- fitting_wave$particles_data
   data$in_bounds <- factor(as.character(data$in_bounds), levels = c("0", "1"))
   
@@ -825,50 +1058,39 @@ gp_plot <- function(fitting_wave,
   data$wave_plot <- "previous"
   data$wave_plot[current] <- "current"
   
-  # subset data for partial predictions at local range
-  if(local_range) {
+  if(latest_wave) {
     data_pred <- data[current, ]
   } else {
     data_pred <- data
   }
   
-  
-  # if(fixed_at == "mean") mle <- NULL
-  # else {
-  #   ll <- function(betas) {
-  #     nd <- matrix(betas, nrow = 1)
-  #     colnames(nd) = names(betas)
-  #     -predict(gp, newdata = nd, type = "UK")$mean
-  #   }
-  #   opt <- optim(colMeans(as.matrix(data_pred[, par_names])), fn = ll)
-  #   mle <- opt$par
-  #   names(mle) <- par_names
-  # }
-  
   # get mle for partial predictions
-  mle <- fitting_wave$mle
+  mle <- fitting_wave$params_max_optim
   
   # compute partial predictions 
   preds <- partial_predictions(varying = varying, 
                                data = data_pred, 
-                               gp = gp, mle = mle)
-  
-  color_point <- ifelse(filter_bounds, "in_bounds", "wave_plot")
+                               loglik_model = loglik_model, mle = mle)
   
   if(varying != "all") {
+    # bring out of the matrix the par_values for plotting
+    data_plot <- do.call(data.frame, data)
+    cols_change <- grep("par_values", names(data_plot))
+    names(data_plot)[cols_change] <- par_names
     
+    # plot  
     p <-
       ggplot() +
       
       # data
-      geom_point(data = data, 
+      geom_point(data = data_plot, 
                  mapping = aes_string(x = varying, y = "ll",
                                       color = color_point, shape = color_point),
                  size = 2, alpha = 0.5) + 
       scale_shape_manual(values = c(16, 17)) +
       scale_color_viridis(end = 0.7, discrete = TRUE) +      
       
-      # gp predictions 
+      # loglik_model predictions 
       ggnewscale::new_scale_color() +
       scale_color_viridis(end = 0.7, discrete = TRUE, option = "A") +   
       ggnewscale::new_scale_fill() +
@@ -888,7 +1110,7 @@ gp_plot <- function(fitting_wave,
       xlab("parameter value")
     
     print(p)
-    return(list(plot = p, data_points = data, data_preds = preds))    
+    return(list(plot = p, data_points = data_plot, data_preds = preds))    
   } else {
     
     # when all parameters are varied, data must be replicated to be plotted 
@@ -917,7 +1139,7 @@ gp_plot <- function(fitting_wave,
       scale_shape_manual(values = c(16, 17)) +
       scale_color_viridis(end = 0.7, discrete = TRUE) +      
       
-      # gp predictions 
+      # loglik_model predictions 
       ggnewscale::new_scale_color() +
       scale_color_viridis(end = 0.7, discrete = TRUE, option = "A") +   
       ggnewscale::new_scale_fill() +
@@ -948,19 +1170,15 @@ gp_plot <- function(fitting_wave,
 # from every one to check that fire sizes are OK with this landscape.
 # (Finding a prior that would simulate proper-sized fires was too hard.)
 
-# pp <- prior_sim(mu_int = -1.0, sd_int = 0.02, sd_veg = 0.02,
-#                 r_z = 1.5, r_01 = 1.1) 
-# pp
+# pp <- prior_sim(mu_int = -1.1, sd_int = 0.02, r_z = 1, r_01 = 3)
 # fire_prior_sim(pp)
-# 
-# # param_mat <- matrix(NA, n_rep, 9)
-# param_mat[30, ] <- pp
+
+# param_mat <- matrix(NA, n_rep, d)
+# colnames(param_mat) <- par_names
+# param_mat[10, ] <- pp 
 # saveRDS(param_mat, "files/param_mat.rds")
 param_mat <- readRDS("files/param_mat.rds")
-# remove fwi
-param_mat <- param_mat[, -5] 
-# remove reference category in intercept
-param_mat[, 2:3] <- param_mat[, 2:3] + param_mat[, 1]
+# parameterization without FWI and no vegetation class as reference
 
 # Simulate real fires ------------------------------------------------------
 
@@ -992,11 +1210,38 @@ for(p in 1:n_rep) {
   fires_real[[p]] <- fires_real_internal
 }
 
-# EDITAR ESTO: -------------------------------------------------------------
-# (solo un poco)
+
+# identify very small fires
+fire_sizes <- do.call("cbind", lapply(fires_real, function(par) {
+  do.call("c", lapply(par, function(f) {
+    f$counts_veg %>% sum
+  }))
+})) %>% as.data.frame
+
+# get size limits for estimable fires
+decent_large <- 0.2 * as.vector(large_fire) %>% sum
+decent_small <- 111 # smallest in our data set (10 ha)
+
+table(as.numeric(as.matrix(fire_sizes)) >= decent_small)
+table(as.numeric(as.matrix(fire_sizes)) <= decent_large)
+
+# matrix indicating which fires have a proper size to be estimated.
+# Fires too large or too small do not discard parameters that make fires
+# out of bounds (not spreading or burning everything).
+# This introduces bias in the estimation, but the point here is to find
+# the metric that takes us closest to the true value.
+# This matrix is used in similarity_simulate_particle to ignore too large and
+# too small fires.
+fires_use <- fire_sizes
+for(i in 1:n_rep) {
+  fires_use[, i] <- fire_sizes[, i] >= decent_small &
+                    fire_sizes[, i] <= decent_large
+}
+# colSums(fires_use)
+
 # Get bounds on similarity metrics ----------------------------------------
 
-
+# (quizás tenga algunas ideas desactualizadas)
 
 # Given the landscape resolution and size, similarity metrics between observed
 # and simulated fires are bounded from below, hindering a proper approximation 
@@ -1020,7 +1265,7 @@ for(p in 1:n_rep) {
 # allowed it. Another option is
 #   similarity_threshold = similarity_min + p * (1 - similarity_min) 
 # with p ~ 0.25
-p <- 0.25
+p <- 0.10
 similarity_min <- 0.07
 (similarity_threshold = similarity_min + p * (1 - similarity_min))
 
@@ -1033,62 +1278,47 @@ similarity_min <- 0.07
 # the last one is a good predictor of the likelihood above similarity_threshold.
 # (This allows to compute the likelihood instead of just rejecting the particle).
 
-# simulate largest and smallest fires
-fire_largest <- simulate_fire_compare(
-  landscape = land[, , 1:7],
-  burnable = land[, , "burnable"],
+coef_burn_all <- c(rep(1e6, n_veg_types), rep(0, length(terrain_names)))
+coef_burn_none <- c(rep(-1e6, n_veg_types), rep(0, length(terrain_names)))
+
+simil_lower_large <- similarity_simulate_particle(coef_burn_all, 
+                                                  n_sim = 10)
+simil_lower_small <- similarity_simulate_particle(coef_burn_none, 
+                                                  n_sim = 10)
+
+# check visually:
+small_fire <- simulate_fire(
+  terrain = terrain, 
+  vegetation = vegetation,
   ignition_cells = ig_rowcol,
-  coef = c(1e6, rep(0, 8)),
-  wind_layer = which(dnames == "wind") - 1,
-  elev_layer = which(dnames == "elev") - 1,
-  distances = distances,
+  coef = coef_burn_none,
+  n_veg_types = n_veg_types,
   upper_limit = upper_limit
 )
+fire_plot(small_fire)
 
-fire_smallest <- simulate_fire_compare(
-  landscape = land[, , 1:7],
-  burnable = land[, , "burnable"],
+large_fire <- simulate_fire(
+  terrain = terrain, 
+  vegetation = vegetation,
   ignition_cells = ig_rowcol,
-  coef = c(-1e6, rep(0, 8)),
-  wind_layer = which(dnames == "wind") - 1,
-  elev_layer = which(dnames == "elev") - 1,
-  distances = distances,
+  coef = coef_burn_all,
+  n_veg_types = n_veg_types,
   upper_limit = upper_limit
 )
+fire_plot(large_fire)
 
-similarity_bounds <- array(NA, dim = c(n_met + 1, n_obs, 2),
-                          dimnames = list(
-                            metric = c(metric_names, "size_diff"),
-                            fire_id = 1:n_obs,
-                            extreme = c("smallest", "largest")
-                          ))
-for(i in 1:n_obs) {
-  print(i)# = 1
-  similarity_bounds[1:n_met, i, 1] <- compare_fires_try(
-    fire_smallest, fires_real[[i]]
-  )[metric_names]
-  
-  similarity_bounds[1:n_met, i, 2] <- compare_fires_try(
-    fire_largest, fires_real[[i]]
-  )[metric_names]
-  
-  # add size difference
-  similarity_bounds[n_met + 1, i, 1] <- sum(fire_smallest$counts_veg) - 
-                                        sum(fires_real[[i]]$counts_veg)
-  
-  similarity_bounds[n_met + 1, i, 2] <- sum(fire_largest$counts_veg) - 
-                                        sum(fires_real[[i]]$counts_veg)
-}
 
-simil_lower_large <- similarity_simulate_particle(c(1e6, rep(0, 8)), 
-                                                  n_sim = 1)[, 1, ]
-simil_lower_small <- similarity_simulate_particle(c(-1e6, rep(0, 8)), 
-                                                  n_sim = 1)[, 1, ]
 
+# ojo con el size diff, que puede ser negativo. quizás tomar el valor absoluto?
 similarity_min <- pmax(simil_lower_large, simil_lower_small)
 
-# compare them with observed ones.
-
+# junto large y small en un array
+similarity_bounds <- abind::abind(simil_lower_large, simil_lower_small,
+                                  along = length(dim(simil_lower_large)) + 1)
+dimnames(similarity_bounds)[[length(dim(similarity_bounds))]] <- c("largest", "smallest")
+names(dimnames(similarity_bounds)) <- c(
+  "metric", "rep_id", "mean_var", "extreme"
+)
 
 # Long sobol sequence -----------------------------------------------------
 
@@ -1101,16 +1331,17 @@ particles_all <- particles_sim(n_large)
 
 # Exploring 1 wave --------------------------------------------------------
 
-w1 <- loglik_update(n_pw = 1500)
-p1 <- gp_plot(w1, varying = "all")
+w1 <- loglik_update(n_pw = 200)
+p1 <- loglik_plot(w1, varying = "all")
 p1 +  ylim(-4, 4)
 
-
+p1 <- loglik_plot(result, varying = "all")
+# error en loglik plot, revisar.
 
 # lo que sigue ------------------------------------------------------------
 
 # meter loglik_update en un while() o en un for, para hacer una función que 
-# estime lo loglik de un saque y devuelva el resultado de la última ronda.
+# estime la loglik de un saque y devuelva el resultado de la última ronda.
 
 # Loopear sobre replicas y sobre metricas
 
@@ -1132,5 +1363,25 @@ p1 +  ylim(-4, 4)
 # model_lower = loglik_max - tolerance.
 # Then, loglik_crit = max(loglik_lower, model_lower)
 
+# quizás seleccionar partículas que sean >= max_obs - 0.25 * (max_obs - min_obs) 
+# más abajo del máximo.
+# Por otro lado, usar solo las in_bounds para ajustar el GAM lo hace mucho más 
+# económico.
+# VAMOS CON GAM Y NO CON GP para buscar partículas. 
+# A LO SUMO SE PUEDE VER SI VALE LA PENA AL FINAL USAR
+# GP EN VEZ DE BAYESIAN S-MVN, pero será en otro momento.
+# También hay que probar estimar el map del S-MVN en vez de muestrear la posterior.
+
+
+
 # probar cuándo esto puede tener sentido. quizás usando siempre el criterio de
 # la tolerancia funciona mejor.
+
+
+# El more_data tarda muchísimo si le pedimos que todo lo que devuelva sean 
+# partículas efectivamente buenas. Además, devuelve mucha porquería, muchos datos.
+# Mejor no pedirle tanto.
+
+
+
+

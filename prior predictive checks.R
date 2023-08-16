@@ -2,13 +2,14 @@
 
 library(terra)
 library(tidyverse)
-library(Rcpp)
+# library(Rcpp)
 
 library(logitnorm)
 library(LaplacesDemon)
 
-sourceCpp("spread_functions.cpp")
+# sourceCpp("spread_functions.cpp")
 source("spread_functions.R") # for rast_from_mat
+library(FireSpread)
 
 # load Cholila fire data. The raster is used as a template for plotting.
 land <- readRDS(file.path("data", "focal fires data", 

@@ -87,3 +87,81 @@ clases o no, y hasta podría hacerse a ojo.
 - Analizar en GEE la abundancia de cada veg type (6) en paisajes y en incendios,
   para todos los fuegos (ig point known y unknown)
   
+  
+  
+  
+---- CONSIDERACIONES RANDOM EFFECTS --------------------------------- 
+  
+En vez de ajustar un modelo de loglik para cada fuego, quizás convenga
+modificar a mano los intercepts y el sd de los random effects para 
+que se ajuste bien a todos los incendios, asumiendo que la likelihood de los
+demás parámetros casi no va a cambiar, ya que son incendios pequeños
+que informan poco. 
+
+Se pueden ajustar modelos de tipo 
+raneff ~ fire size, 
+(usando todas las muestras de la posterior de incendios con ig conocido)
+
+luego predecir estocásticamente el raneff de los fuegos no usados
+y evaluar qué media y sd ajusta bien a todo el set de incendios completo. 
+
+A posteriori, podemos usar la relación entre fire size e intercept para
+estimar el punto de ignición, muestreando intercepts de ese modelo.  
+ 
+En fin, quizás no sea necesario ajustar los 210 MVN models, sino 51.
+
+
+----
+Otra: si los MVN son muy lentos como para ajustar a 210 datos, podemos
+usar GPs y poner dos umbrales para la parte de rechazo de partículas:
+1) el e_j propuesto tiene que superar el umbral del borde del terreno;
+2) si pasa ese filtro, e_j tiene que ser mayor a un umbral deseado.
+
+El primer filtro evita evaluar el GP cuando el GP queda out of bounds. 
+Esto requeriría guardar un GP (likelihood) y un GAM (in_bounds_model) 
+por incendio, pero no me parece mal. 
+
+Estudiar cómo sería un gibbs sampler para un modelo como el mío.
+
+
+___ USAR GIBBS!!!
+
+Yo me preocupaba por que la likelihood estuviera truncada de abajo, 
+pero una forma muy simple de resolver eso es usar el GP completo y 
+rechazar las partículas que tienen una like < lower_limit + delta
+
+Supongamos que lower_limit = 0.05 es el overlap del incendio más grande.
+delta podría ser algo así como 2Sigma del GP cuando está fuera de bounds.
+
+Para asegurarnos de nunca estar cerca de ese borde, al momento de 
+samplear random intercepts, hacemos lo siguiente:
+
+01) proponemos un alpha_star de la distrib de propuestas
+02) sorteamos si está in_bounds con el in_bounds_gam
+03) evaluamos su like con el GP, = like(alpha_star)
+		(en este paso, simulamos con el GP, para considerar la 
+		 uncertainty del metamodelo)
+04) la conservamos si like(alpha_star) > lower_limit + delta
+05) alpha_i = sorteo(alpha_star, alpha_i-1) tipo metropolis.
+
+Otra forma más simple sería sin usar el in_bounds_gam, 
+simplemente rechazando todo lo que esté > lower_limit + delta.
+Pero seguramente usar el gam disminuiría la tasa de rechazo.
+
+Este artilugio sería como un truncamiento de la likelihood function 
+en la dimensión del intercept. Como no podemos ver cuánto le erramos 
+a la verdadera similarity porque el paisaje nos restringe, sabemos
+que es baja y la igualamos a cero. Esto afectaría principalmente 
+a la incertidumbre sobre cada intercept, y no tanto a la incertidumbre
+sobre los hiperparametros.
+
+Para el punto de ignición podemos hacer exactamente lo mismo, y estimarlo
+de forma discreta. luego, agregamos un filtro similar al que tenemos
+para el intercept:
+	nos fijamos si el pixel propuesto está en el incendio
+	si está, seguimos, evaluando la likelihood y todo; si no, 
+	probamos con otro.
+
+
+
+
