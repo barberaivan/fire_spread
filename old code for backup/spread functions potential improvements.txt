@@ -1,0 +1,32 @@
+Improvemts for spread functions
+
+Probably the most time consuming step of the simulation is computing the spread probability. In this regard, there are two possible changes:
+
+1) Given a parameter vector, compute the spread probability from every pixel towards all the neighbours. Then, many simulations would be cheap, as all probabilities are already computed. But computing all the probabilities is expensive.
+
+2) An intermediate strategy is to precompute all the terms that are directional, i.e., those which depend on the neighbouring relationship between pixels: slope index and wind direction. Then, the only remaining computation is a linear combination of data and parameters.
+
+3) And perhaps having all predictors precomputed like that, the probability computation
+for all the landscape could be fast. (So, we could do 2 and 1).
+
+4) Perhaps, using arma::vec and arma::cube classes, matrix multiplications could be faster. Check that first. And maybe some matrix operations with Armadillo might be faster.
+
+First, test whether the probability computation involves most of the simulation time.
+
+
+
+----
+
+Ignore this, read comment at the end of benchmarks script.
+
+
+----
+2023-03-04
+
+A better idea from Iván R:
+
+Instead of pretending to precompute everything, make a dynamic with the burn probabilities, as arma::cube prob_cube(nrow, ncol, 8). 8 because each pixel has 8 neighbours. Then, probabilites are computed if they were not already present in the cube.
+
+Before implementing that, compare the timing of simulate_fire_mat_cpp and an equivalent function which does not compute the probability, just holds it constant.
+
+The max improvement would be to reduce computation time for 1 fire to 0.7 * previous_time
