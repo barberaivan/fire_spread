@@ -145,7 +145,7 @@ samplear random intercepts, hacemos lo siguiente:
 05) alpha_i = sorteo(alpha_star, alpha_i-1) tipo metropolis.
 
 Otra forma más simple sería sin usar el in_bounds_gam, 
-simplemente rechazando todo lo que esté > lower_limit + delta.
+simplemente rechazando todo lo que esté < lower_limit + delta.
 Pero seguramente usar el gam disminuiría la tasa de rechazo.
 
 Este artilugio sería como un truncamiento de la likelihood function 
@@ -161,6 +161,199 @@ para el intercept:
 	nos fijamos si el pixel propuesto está en el incendio
 	si está, seguimos, evaluando la likelihood y todo; si no, 
 	probamos con otro.
+
+
+
+---- NOTAS LOGLIK PARA CADA INCENDIO -------------------------------------
+2023-10-10
+
+
+Intenté ajustar un MVN para un incendio y fue un terrible fracaso. 
+También fracasó usar un GP para un incendio, y me pasé a un fixed effects model
+porque la RAE apuraba. 
+
+A posteriori vi que la superficie de similitud es mucho más informativa si la miramos 
+en la escala de la similitud, no log ni logit. Y más aún si trabajamos con fuegos
+separados, ya que la similitud está en [~0, 1].
+
+Por otro lado, tenía bugs en el código de las olas, haciendo que el aprendizaje 
+no fuera muy acumulativo. En momentos el GP se ponía puntudo y traía problemas.
+Ahí hay que ajustarlo con más datos y ya. 
+Y nunca hay que quitar los out_of_bounds data para ajustar el GP. Al fin y al cabo,
+necesitamos que el GP sepa cuándo está tocando los bounds, para poder 
+rechazar las partículas. 
+
+Con el modelo fijo fue necesario muestrear principalmente partículas
+con overlap >= 0.14, y eso que las más mejores andaban por 0.16.
+
+De hacer el modelo mixto, usaría GPs y no MVN, y no sé si usaría el 
+approach de dos pasos (Lunn method) o intentaría muestrear un single
+model con todos los GPs a la vez. Ahí sería mejor usar Gibbs y no un
+random walk, porque la dimensión es enorme (57 x 6?).
+
+
+
+..... IDEAS PARA MEJORAR ....................................................
+(pensando en un modelo jerárquico)
+2023-10-10
+
+* Ajustar los GP en escala overlap, no log ni logit.
+
+* No restringir el signo de los parámetros.
+
+* Agregar un parámetro al modelo que sea "steps": número máximo posible de 
+  ciclos de quema. A la par, permitiría que la probabilidad de propagación
+  tenga upper_limit = 1.
+  Esto haría que los fuegos no salgan taaan parcheados como salen. Ese parcheo
+  puede traer malas consecuencias al simular dinámica de vegetación (imagine
+  many patches of unburned forest in the burned area).
+
+* Probar SEQUENTIAL MONTE CARLO. Los GPs son tediosos, llevan mucho tiempo, y 
+	llegado un punto, para que funcionen bien, hay que darles muchos datos, 
+	lo que hace muy costoso seguir mejorando el overlap. 
+	
+	O algo parecido al SMC, total solo necesitamos encontrar el pico de la likelihood.
+
+	RESULTADO: esto anduvo muy bien, al menos desde que llegué a un overlap de 0.24
+	con los GP, con el smc pude llegar rápidamente a ~0.3.
+	Hay una zona compicada en la likelihood que se supera en overlap > 0.2,
+	al menos con el fuego ese 2008_3, pero me suena que puede pasar con otros.
+	
+	PROBAR SI EL SMC funciona bien desde el comienzo! Recordar que acá la parte 
+	difícil se pasó usando los GP.
+	
+* Si llegamos a una likelihood acampanada, probar ajustar un SMVN con el paquete
+	sn. Si remuestreamos los datos con overlap > 0.2, usando prob = overlap,
+	luego podemos ajustar la distri con sn::selm.fit. Al menos para el incendio 
+	2008_3 anduvo muuuy bien.
+	
+* Chequear si la aproximación de la distrib por remuestreo es fiable. 
+	Simular partículas tipo sobol en la box de las buenas partículas. Para cada una
+	calcular la densidad en una smvn. Luego remuestrear de acuerdo a esa prob,
+	ajustar una smvn con esas remuestras y comparar la distri original
+	con la aproximada.
+	
+	Me suena que no está bien reescalar el overlap antes de remuestrear. reduce
+	mucho la incertidumbre. También se puede evaluar ese efecto
+	con simulaciones.
+	
+	
+----
+Lo más actualizado está en pseudolikelihood_estimation_[...]_03	
+	
+
+Lo lindo de estos métodos es que al no tener los GP ni los MVN en stan, 
+ajustar muchos fueguitos pequeños sería muy fácil.
+
+
+* Cuando estemos en la zona 3 de la likelihood, con fuegos que encuentran 
+	barreras, podemos detectarlo ajustando un gam al intercept 
+	y viendo cómo cambia su derivada. Donde se aplana luego de un pico, 
+	o en el punto de inflexión, de ahí para arriba se puede enfocar
+	la búsqueda de partículas.
+	
+* Quizás convenga aprender todo esto primero con fuegos peques, para no 
+	andar con ineficiencias en fuegos gigantes que tardan horas en correr 800 partículas.
+
+
+-----
+retomando el 2023-11-23.
+
+Ahora sigo con el SMC en 
+pseudolikelihood_estimation_smc_01.R
+Este script se hereda de
+pseudolikelihood_estimation_gp_waves_03.R 
+
+Probar el simulador con límite de steps, a ver si llegamos a un 
+overlap más alto. 
+
+Leer bien lo de arriba que dice "..IDEAS PARA MEJORAR..".
+No es correcto usar solamente el overlap para remuestrear y aproximar una distri
+porque hay que considerar que esas partículas están ahí por haber salido
+de partículas anteriores con cierta probabilidad.
+
+Hay un paper que leí hace poco que explica bien cómo deberían calcularse los 
+weights.
+
+De todos modos, si solo busco explorar el espacio para luego ajustar un 
+modelo al overlap a partir de esos puntos (sin remuestreo), no hace falta
+que recalcule los weights. Simplemente voy explorando las zonas de mayor
+overlap de forma bruta.
+
+## estimar la likelihood con una función genérica de kdevine!
+## así nos evitamos los problemas con las likelihoods bimodales. 
+## son un dolor de cabeza.
+## Aunque no vamos a zafar de muestrearlas, ya que luego habrá que hacer el
+   MCMC sobre esas likelihoods.
+
+
+-----
+2023-12-02
+
+El ABC funciona por rejection dado un umbral de distancia(obs, sim).
+Si directamente muestreamos la similitud, vamos a tener un error de aproximación
+mucho más grande. Básicamente, la teoría dice que mientras más astringente el umbral,
+menor el error. Entonces, deberíamos aceptar las partículas lo más cercanas posible
+al máximo de la similitud. Es como definir una likelihood plana que tiene soporte
+en similitud > umbral. 
+
+El problema es que si queremos un modelo mixto, sí o sí necesitaremos que todas
+las likelihoods compartan soporte para los parámetros no jerárquicos. Si no lo
+comparten, la likelihood conjunta para ese parámetro se hace cero. Y lograr que los
+210 datos (incendios) tengan soporte común es casi imposible. 
+
+Entonces necesitamos definir densidades que no tengan soporte compacto, sino que 
+desciendan hacia -Inf muy de a poco, para poder evaluarlas. Una forma de lograrlo
+sería así:
+
+* Buscar la zona de mayor similitud(obs, sim).
+* Ajustar un GP a todos los datos. Aunque solo importe el pico, ajustándolo 
+	con menos datos funciona muy mal (crea un pico que no existe). 
+* Muestrear esa "likelihood" con un umbral alrededor del percentil 95 % de los 
+	fitted values. Pero cuando esta likelihood se anule, no debería devolver cero,
+	para no tener soporte compacto. Ahí se devuelve el resultado de una MVN (or skew-).
+* Para obtener una MVN, le hacemos un MCMC a ese GP y le ajustamos una distri a
+	las muestras. A esa MVN le encogemos bastante la varianza, para que 
+	no arroje valores más altos que los debidos. Luego pensar bien cuál es el
+	encogimiento óptimo.
+
+# Todo esto está probado al final de
+<pseudolikelihood_estimation_gp_fit_mcmc.R>	
+
+
+
+
+____
+2023-12-05
+
+Todo anda medio mal, porque la likelihood no parece ser tan identificable. 
+Aparentemente, el GP estaba copiando terriblemente la previa. 
+
+Al menos para el fuego 2008_3, hay muchísima corr entre el intercept y los 
+betas. Entonces es imposible ajustar una función decente si no usamos un soporte
+compacto. 
+
+IDEA: hasta ahora, la previa siempre fue algo informativa, no compacta.
+De ahora en más, ajustaremos una likelihood compacta. Es decir, usaremos una
+previa uniforme rectangular. Aquí ajustaremos un GAM re complejo, y como 
+en todo el soporte habrá datos, no tendremos el problema de que se nos vaya al upite.
+A ese gam podríamos ir complejizándolo a medida que juntamos más datos.
+
+
+probar al final de smc_02. Esto anduvo medio medio.
+
+
+-------
+
+EUREKAAAAAA
+
+en smc_02, en 
+# Búsqueda del máximo con previas planas pero cuadradas -------------------
+
+le tunié la var_factor en 1, y con una previa plana compacta más razonable
+encontró una likelihood muy buena. Le ajusté un GAM y va re bien.
+Tiene como 5600 datos. Puedo probar cuánto tarda un GP.
+
 
 
 

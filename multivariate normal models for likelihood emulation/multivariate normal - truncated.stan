@@ -1,7 +1,7 @@
 // multivariate normal model with truncated-normal likelihood
 functions {
   
-  // Multivariate skew-normal log-density, with location vector xi, and 
+  // Multivariate normal log-density, with location vector xi, and 
   // vcov matrix Omega.
   // This function was optimized to decrease the looping computations.
   vector multi_normal_ld(data matrix X, data vector ones, row_vector xi, 

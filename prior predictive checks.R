@@ -1,57 +1,66 @@
+# Code to define priors, at least placeholder ones to perform the
+# MVN-ABC pseudolikelihood estimation.
+
+# The priors should try to be similar across parameters.
+
+# vfi and tfi are standardized, although not at the fire scale, but at the
+# regional scale.
+# slope ranges from -1 to 1, and wind between 0 and 15.
+
 # Packages and data -------------------------------------------------------
 
 library(terra)
 library(tidyverse)
-# library(Rcpp)
-
 library(logitnorm)
 library(LaplacesDemon)
-
-# sourceCpp("spread_functions.cpp")
-source("spread_functions.R") # for rast_from_mat
 library(FireSpread)
 
+source(file.path("..", "FireSpread", "tests", "testthat", "R_spread_functions.R"))
+# for rast_from_mat and a few constants
+
 # load Cholila fire data. The raster is used as a template for plotting.
-land <- readRDS(file.path("data", "focal fires data", 
-                          "landscapes_ig-known_non-steppe", "2015_50.rds"))
+land <- readRDS(file.path("data", "focal fires data",
+                          "landscapes_ig-known", "2015_50.rds"))
 land_raster <- rast(file.path("data", "focal fires data", "raw data from GEE",
                               "fire_data_raw_2015_50.tif"))
 
-# Comments ----------------------------------------------------------------
 
-# Intercepts are the vegetation parameters, parameterized without a reference 
-# category, and should not be restricted in sign;
-# fwi, northing, windir, and slope, should have positive effects;
-# elevation should have negative effect.
 
-# fwi and elevation live in the standardized scale, [~ -5, ~ 5],
-# while northing, wind, and slope are in [-1, 1].
-# the priors for the former could be wider.
+# Get windspeed scale in all landscapes -----------------------------------
 
-# the full-data model will include a random effect at the fire level, which is 
-# centred at zero:
+files <- list.files(file.path("data", "focal fires data", "landscapes_ig-known"))
+wsumm <- function(x) {
+ c(
+   "min" = min(x, na.rm = TRUE),
+   "max" = max(x, na.rm = TRUE),
+   "sd" = sd(x, na.rm = TRUE),
+   "mean" = mean(x, na.rm = TRUE),
+   "median" = median(x, na.rm = TRUE)
+ )
+}
 
-# linpred_f = fixed_effects + error_f
-# error_f ~ Normal(mu_f, sigma)
-# mu_f = 0 + beta_fwi * fwi_f
+wind_values <- do.call("rbind", lapply(1:length(files), function(i) {
+  # i = 1
+  print(i)
+  ll <- readRDS(file.path("data", "focal fires data", "landscapes_ig-known", files[i]))
+  return(wsumm(ll$landscape[, , "wspeed"]))
+}))
+rm(ll); gc()
 
-# where the global intercept for mu_f is  centred at zero for identifiability.
-# In this way, fixed_effects represent the linear predictor for an average fire
-# when fwi_f = 0.
+summary(wind_values) # summary across fires
+# most vary between 0 and 10
+
 
 # Constants ---------------------------------------------------------------
 
 upper_limit <- 0.5
-n_veg_types <- 6
-n_terrain <- 4
-vegetation_names <- c("shrubland", "subalpine", "wet",
-                      "dry_a", "dry_b", "steppe")
-terrain_names <- c("northing", "elev", "wind", "slope")
 
 # Logistic curves for standardized variables ------------------------------
 
 sd_z <- 5
 r_z <- 0.15
+sd_log <- 1.5
+mean_log <- -0.5
 
 par(mfrow = c(1, 2))
 #normal
@@ -59,7 +68,7 @@ curve(upper_limit * plogis(abs(rnorm(1, 0, sd_z)) * x),
       main = paste("Normal(sd = ", sd_z, ")", sep = ""),
       from = -5, to = 5, col = rgb(0, 0, 0, 0.1),
       ylab = "burn prob",
-      xlab = "[-1, 1] variable",
+      xlab = "standardized variable",
       ylim = c(0, upper_limit))
 for(i in 1:1000) {
   curve(upper_limit * plogis(abs(rnorm(1, 0, sd_z)) * x), add = TRUE,
@@ -78,15 +87,27 @@ for(i in 1:1000) {
         col = rgb(0, 0, 0, 0.1))
 }
 
+# # lognormal # HARD
+# curve(upper_limit * plogis(rlnorm(1, mean_log, sd_log) * x),
+#       main = paste("lognormal (mean = ", mean_log, " sd = ", sd_log, ")", sep = ""),
+#       from = -5, to = 5, col = rgb(0, 0, 0, 0.1),
+#       ylab = "burn prob",
+#       xlab = "standardized variable",
+#       ylim = c(0, upper_limit))
+# for(i in 1:1000) {
+#   curve(upper_limit * plogis(rlnorm(1, mean_log, sd_log) * x), add = TRUE,
+#         col = rgb(0, 0, 0, 0.1))
+# }
+
 par(mfrow = c(1, 1))
 
 # densities
 curve(dnorm(x, 0, sd_z) * 2, from = 0, to = 20, ylim = c(0, 0.3))
 curve(dexp(x, r_z), col = 2, add = TRUE)
-# curve(dlnorm(x, log(4), 2), col = 4, add = TRUE)   # hard to mimic with log-normal
+curve(dlnorm(x, 3, 2), col = 4, add = TRUE)   # hard to mimic with log-normal
 
 # fit log-normal to exponential:
-rsamps <- rexp(1e5, 0.25)
+rsamps <- rexp(1e6, 0.1)
 log_samps <- log(rsamps)
 mm <- lm(log_samps ~ 1)
 curve(dexp(x, 0.25), col = 2, from = 0, to = 20)
@@ -95,7 +116,7 @@ curve(dlnorm(x, log(coef(mm)), sigma(mm)), col = 4, add = TRUE) # feo feo el fit
 # Logistic curves for [-1, 1] variables ---------------------------------
 
 sd_01 <- 10
-r_01 <- 0.05
+r_01 <- 0.04
 
 par(mfrow = c(1, 2))
 
@@ -127,58 +148,122 @@ par(mfrow = c(1, 1))
 
 
 # densities
-curve(dnorm(x, 0, sd_01) * 2, from = 0, to = 20, 
+curve(dnorm(x, 0, sd_01) * 2, from = 0, to = 20,
       ylim = c(0, 0.18))
 curve(dexp(x, r_01), col = 2, add = TRUE)
+
+# Logistic curves for wind [0, 15] ---------------------------------
+
+# 0.5 is frequently the wind sd
+sd_wind <- sd_z * 0.5
+r_wind <- r_z / 0.5
+wupr <- 10
+
+par(mfrow = c(1, 2))
+
+#normal
+curve(upper_limit * plogis(abs(rnorm(1, 0, sd_wind)) * x),
+      main = paste("Normal(sd = ", sd_wind, ")", sep = ""),
+      from = -wupr, to = wupr, col = rgb(0, 0, 0, 0.1),
+      ylab = "burn prob",
+      xlab = "wind",
+      ylim = c(0, upper_limit))
+for(i in 1:1000) {
+  curve(upper_limit * plogis(abs(rnorm(1, 0, sd_wind)) * x), add = TRUE,
+        col = rgb(0, 0, 0, 0.1))
+}
+
+# exponential
+curve(upper_limit * plogis(rexp(1, r_wind) * x),
+      main = paste("exponential (r = ", r_wind, ")", sep = ""),
+      from = -wupr, to = wupr, col = rgb(0, 0, 0, 0.1),
+      ylab = "burn prob",
+      xlab = "wind",
+      ylim = c(0, upper_limit))
+for(i in 1:1000) {
+  curve(upper_limit * plogis(rexp(1, r_wind) * x), add = TRUE,
+        col = rgb(0, 0, 0, 0.1))
+}
+
+par(mfrow = c(1, 1))
+
 
 
 # Intercepts distribution -------------------------------------------------
 
-sd_int <- 10
+sd_int <- 5
 mu_int <- 0#logit(0.2 / upper_limit)
 curve(dlogitnorm(x, mu_int, sd_int), n = 1000)
 
 # Function to simulate from the prior -------------------------------------
 
-prior_sim <- function(mu_int = 0, sd_int = 20, r_01 = 0.05, r_z = 0.15,
-                      sigma_sd = 3) {
-  
-  b_fwi <- rexp(1, r_z)
-  sigma <- abs(rnorm(1, 0, sigma_sd))
-  error <- rnorm(1, b_fwi * rnorm(1), sigma)
-  
-  intercepts <- rnorm(n_veg_types, 0, sd_int) + error
-  names(intercepts) <- vegetation_names
-  
-  slopes <- c(
-    "aspect" = rexp(1, r_01),                 # positive 
-    "wind" = rexp(1, r_01),                   # positive
-    "elevation" = (-1) * rexp(1, r_z),        # negative
-    "slope" = rexp(1, r_01)                   # positive
-  )
-  
-  return(c(intercepts, slopes))
+prior_dist <- function(mu_int = 0, sd_int = 10,
+                       r_slope = 0.04,
+                       r_fi = 0.15,
+                       r_wind = 0.3,
+                       type = "rng", # or "quantile"
+                       n = 1,
+                       p = NULL) {
+
+  if(type == "rng") {
+    b <- cbind(
+      "intercept" = rnorm(n, mu_int, sd_int),
+      "b_vfi" = rexp(n, r_fi),
+      "b_tfi" = rexp(n, r_fi),
+      "b_slope" = rexp(n, r_slope),
+      "b_wind" = rexp(n, r_wind)
+    )
+
+    if(n == 1) {
+      parnames <- colnames(b)
+      b <- as.numeric(b)
+      names(b) <- parnames
+    }
+    return(b)
+  }
+
+  if(type == "quantile") {
+
+    if(is.null(p)) stop("Provide probability to compute quantiles.")
+    if(length(p) %% 5 != 0) stop("p must be a multiple of the number of parameters (5).")
+
+    if(length(dim(p)) < 2) p <- matrix(p, ncol = 5)
+    if(length(dim(p)) == 2) {
+      if(ncol(p) != 5) p <- matrix(as.numeric(p), ncol = 5)
+    }
+
+    q <- cbind(
+      "intercept" = qnorm(p[, 1], mu_int, sd_int),
+      "b_vfi" = qexp(p[, 2], r_fi),
+      "b_tfi" = qexp(p[, 3], r_fi),
+      "b_slope" = qexp(p[, 4], r_slope),
+      "b_wind" = qexp(p[, 5], r_wind)
+    )
+
+    return(q)
+  }
 }
 
-prior_sim()
-
+prior_dist(n = 1)
+prior_dist(n = 1, type = "quantile")
+prior_dist(n = 1, type = "quantile", p = runif(4))
+prior_dist(n = 1, type = "quantile", p = runif(10))
+prior_dist(n = 1, type = "quantile", p = runif(20))
+prior_dist(n = 1, type = "quantile", p = matrix(runif(20), 5, 4))
 
 # Graphical prior check ---------------------------------------------------
 
 # matrix to fill
-hollow <- land$vegetation
-hollow[land$vegetation == 99] <- -1
-hollow[land$vegetation < 99] <- 0
+hollow <- land$burnable - 1
 
-pp <- prior_sim()
+(pp <- prior_dist())
 
 set.seed(1)
-fire_prior <- simulate_fire_cpp(
-  terrain = land$terrain, 
-  vegetation = land$vegetation,
+fire_prior <- simulate_fire(
+  landscape = land$landscape,
+  burnable = land$burnable,
   ignition_cells = land$ig_rowcol,
   coef = pp,
-  n_veg_types = n_veg_types,
   upper_limit = 0.5
 )
 
