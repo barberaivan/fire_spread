@@ -356,5 +356,22 @@ Tiene como 5600 datos. Puedo probar cuánto tarda un GP.
 
 
 
+--------------
+
+Seguir en 
+single fire posterior - surrogate vs simulator.R
+
+donde puse "seguir acá". El gam bernoulli anda bien, pero debería muestrear
+más puntos en donde tiene mucha incertidumbre. 
+
+Tirar una nueva seq de sobol muy grande (1e5 o 1e6), cuantificar el width
+del IC95 y remuestrear esas partículas en base al IC.
+
+Luego simular en esas partículas.
+
+
+
+
+
 
 

@@ -1,14 +1,8 @@
-# This code inherits from _smc_02.R, and here I develop the search for a
-# likelihood function with compact support.
-# There remain unnecessary functions. The code should be clened.
+# This code inherits from _compact_support.R, but here I clean it and reduce the
+# code to test only the exploration algorithm.
 
-# Ideas to test:
-
-# * use MVN kernel to reproduce particles
-# * tune sigma_factor of that kernel
-# * try weighting the particles differently, for example:
-#   prob = overlap ^ weight_power,
-#   with weight_power ~ 2
+# Tasks:
+# * Test how a global search approach deals with a bimodal surface.
 
 # Packages ----------------------------------------------------------------
 
@@ -26,6 +20,10 @@ library(MGMM)          # fit MVN distribution
 library(Matrix)        # nearPD, searches the closest PD matrix.
 library(stutils)       # tryNULL, for search of nearPD
 library(logitnorm)
+
+library(sn)
+library(trialr) # rlkjcorr
+library(truncnorm)
 
 library(foreach)       # parallelization
 library(doMC)          # doRNG had problems with cpp functions
@@ -258,6 +256,34 @@ similarity_simulate_parallel <- function(particles_mat = NULL,
 
   return(res)
 }
+
+# the same function, but computing only the overlap. x is the parameter vector.
+similarity_simulate_simpler <- function(x, n_sim = 20,
+                                        fire_data = NULL) {
+
+  ## testo
+  # particle <- particles_sim(N = 1)
+  ## end testo
+  metrics <- numeric(n_sim)
+
+  # simulate and compute metrics
+  for(i in 1:n_sim) { # simulated fires by particle
+    fire_sim <- simulate_fire_compare(
+      landscape = fire_data$landscape,
+      burnable = fire_data$burnable,
+      ignition_cells = fire_data$ig_rowcol,
+      coef = particle[1:(n_coef-1)],
+      upper_limit = upper_limit,
+      steps = particle[n_coef]
+    )
+
+    metrics[i] <- overlap_spatial(fire_sim,
+                                  fire_data[c("burned_layer", "burned_ids")])
+  }
+
+  return(mean(metrics))
+}
+
 
 # get_bounds: computes the metrics for the largest and smallest fires possible
 get_bounds <- function(fire_data, n_sim = 20) {
@@ -783,36 +809,24 @@ explore_likelihood_iterate <- function(
 }
 
 
-# now consider the kernel density to weight new particles
-explore_likelihood_kernel <- function(data, n = 600, var_factor = 2,
-                                      n_best = 500, p_best = NULL,
-                                      support, spread_data) {
+# the same functions but made for testing a known function
 
-  # ## TEST INPUTS
-  #
-  # # first wave
-  # ss <- sobol(n = 1000, dim = n_coef)
-  # particles <- scale_params(ss, sup)
-  # sim1 <- similarity_simulate_parallel(particles, spread_data)
-  #
-  # # prior at logit scale
-  # particles_raw <- logit_scaled(particles, sup)
-  # sim1$prior <- logistic_prior(particles_raw) # at logit scale!!
-  # sim1$kernel <- 1
-  # sim1$weight <- sim1$overlap * sim1$prior / sim1$kernel    ## prior * overlap / 1
-  #
-  # sim1$wave <- 0
-  #
-  # # fn arguments
+explore_test <- function(data, n = 600, var_factor = 2, n_best = "all",
+                         p_best = 0.1, fn = NULL,
+                         support, centre = "local",
+                         sobol = TRUE,
+                         ...) {
+
   # data = sim1
-  # n = 500
-  # var_factor = 2
-  # n_best = 500
+  # n = 600
+  # var_factor = 1
+  # n_best = "all"
   # p_best = NULL
-  # weight_power = 1
-  # support = sup
-  # spread_data = spread_data
-  # ## END TEST INPUTS
+  # fn = dsn_uni
+  # support = support
+  # centre = "local"
+  # sobol = TRUE
+  # dp = dp
 
   # which particles will be resampled?
   if(!is.null(p_best)) {
@@ -824,140 +838,106 @@ explore_likelihood_kernel <- function(data, n = 600, var_factor = 2,
   if(n_best == "all") {
     n_best <- nrow(data)
   } else {
-    data <- data[order(data$overlap, decreasing = TRUE), ]
+    data <- data[order(data$y, decreasing = TRUE), ]
   }
 
   # resample the best particles
   ids_rep <- sample(1:n_best, size = n, replace = T,
-                    prob = data$weight[1:n_best])
+                    prob = data$y[1:n_best])
   dexp <- data[ids_rep, ]
-  # as seed particles are resampled, their weight is taken as 1 to compute
-  # the kernew for their draws.
 
   # transform to unconstrained scale
   dexp$par_values_raw <- logit_scaled(dexp$par_values, support)
 
-  # create new samples from seeds
+  # MVN kernel
+  # first, remove infinite values and redefine n
   finite <- apply(dexp$par_values_raw, 1, function(x) all(is.finite(x))) %>% t
   dexp <- dexp[finite, ]
   n <- nrow(dexp)
 
-  # Independent Normal Kernels
-  vv <- apply(dexp$par_values_raw, 2, var) * var_factor
-  candidates_raw <- sapply(1:n_coef, function(j) {
-    rnorm(n) * vv[j] + dexp$par_values_raw[, j]
-  })
+  V <- make_positive_definite(cov(dexp$par_values_raw))
+  if(anyNA(V)) V <- diag(apply(dexp$par_values_raw, 2, var))
+  Vlarge <- V * var_factor
 
+  # check we can find the cholesky factor
+  tt <- tryNULL(chol.default(Vlarge))
+  if(is.null(tt)) {
+    sss <- apply(dexp$par_values_raw, 2, var)
+    if(any(sss < 0.1)) {sss <- sss + 0.5}
+    Vlarge <- diag(sss * var_factor)
+  }
+
+
+  if(centre == "local") {
+    mus <- dexp$par_values_raw # centred at good particles
+    sobol <- FALSE
+  }
+  if(centre == "global") {
+    mus <- apply(dexp$par_values_raw, 2, mean) # centred at global mean
+  }
+
+  candidates_raw <- rmvn_sobol(n, mus, Vlarge, sobol) %>% t
   # transform to original scale
+  colnames(candidates_raw) <- par_names
   candidates <- invlogit_scaled(candidates_raw, support)
-  colnames(candidates) <- par_names
 
-  # message("Simulating fires")
-  sim_result <- similarity_simulate_parallel(particles_mat = candidates,
-                                             fire_data = spread_data)
-
-  # get prior, kernel and weight
-  sim_result$prior <- logistic_prior(candidates_raw)
-  sim_result$kernel <- normal_kernel(candidates_raw, dexp$par_values_raw,
-                                     sqrt(vv))
-  sim_result$weight <- sim_result$overlap * sim_result$prior / sim_result$kernel
+  # evaluate target function
+  sim_result <- fn(dexp$par_values, ...)
 
   # define wave
   sim_result$wave <- max(data$wave) + 1
 
   # merge old and new datasets
   res <- rbind(
-    data[, names(sim_result)],
+    data[, colnames(sim_result)],
     sim_result
   )
 
   return(res)
 }
 
-
-# iterate waves of explore_likelihood_kernel()
-explore_likelihood_kernel_iterate <- function(
-    n_waves = 10, data, n = 500, var_factor = 2, n_best = 500, p_best = NULL,
-    support, spread_data
+# iterate waves of explore_likelihood()
+explore_test_iterate <- function(
+    n_waves = 10,
+    data, n = 500, var_factor = 1.5, n_best = "all", p_best = NULL,
+    weight_power = 1, support,
+    centre = "global", sobol = TRUE,
+    fn = NULL, ...
 ) {
 
   last_wave <- max(data$wave)
-  m <- paste("Search starts at max overlap = ",
-             round(max(data$overlap), 4), sep = "")
+  m <- paste("Search starts at max y = ",
+             round(max(data$y), 4), sep = "")
   message(m)
 
   # initialize res as previous data
   res <- data
 
-  for(i in 1:n_waves) {
-    res <- explore_likelihood_kernel(
-      data = res, n = n, var_factor = var_factor, n_best = n_best,
-      p_best = p_best, support = support, spread_data = spread_data
-    )
+  # create var_factor sequence for the variable case
+  var_factors <- rep(var_factor, ceiling(n_waves / length(var_factor)))
 
-    m <- paste("Search wave ", last_wave + i, "; max overlap = ",
-               round(max(res$overlap), 4), sep = "")
+  # # create centre sequence for the variable case
+  # each <- ceiling(length(var_factor) / 2) # var_factors are for each centre
+  # centres_dup <- rep(centre, each = each)
+  # centres <- rep(centres_dup, ceiling(n_waves / length(var_factor)))
+
+  for(i in 1:n_waves) {
+    res <- explore_test(data = res, n = n, var_factor = var_factors[i],
+                        n_best = n_best, p_best = p_best,
+                        support = support,
+                        centre = centre, sobol = sobol,
+                        fn = fn, ...)
+
+    m <- paste("Search wave ", last_wave + i, "; max y = ",
+               max(res$y), sep = "")
     message(m)
   }
 
   return(res)
 }
 
-logistic_prior <- function(x) {
-  margins <- apply(x, 2, dlogis, log = T)
-  prob <- rowSums(margins) %>% exp
-  return(prob)
-}
-
-normal_kernel <- function(draws, seeds, ss) {
-
-  m <- matrix(NA, nrow(draws), nrow(seeds))
-  for(i in 1:nrow(draws)) {
-    for(j in 1:nrow(seeds)) {
-      m[i, j] <- dnorm(draws[i, ], seeds[j, ], ss, log = TRUE) %>% sum %>% exp
-    }
-  }
-
-  mm <- rowSums(m)
-  # scale, so sum(p) == nrow(draws)
-  mmm <- mm * length(mm) / sum(mm)
-
-  return(mmm)
-}
 
 
-gam_formula <- formula(
-  y ~
-
-    # marginal effects
-    s(intercept, bs = basis, m = m, k = k_side) +
-    s(vfi, bs = basis, m = m, k = k_side) +
-    s(tfi, bs = basis, m = m, k = k_side) +
-    s(slope, bs = basis, m = m, k = k_side) +
-    s(wind, bs = basis, m = m, k = k_side) +
-    s(steps, bs = basis, m = m, k = k_side) +
-
-    # interactions
-    ti(intercept, vfi, k = k_int, bs = basis, m = m) +
-    ti(intercept, tfi, k = k_int, bs = basis, m = m) +
-    ti(intercept, slope, k = k_int, bs = basis, m = m) +
-    ti(intercept, wind, k = k_int, bs = basis, m = m) +
-    ti(intercept, steps, k = k_int, bs = basis, m = m) +
-
-    ti(vfi, tfi, k = k_int, bs = basis, m = m) +
-    ti(vfi, slope, k = k_int, bs = basis, m = m) +
-    ti(vfi, wind, k = k_int, bs = basis, m = m) +
-    ti(vfi, steps, k = k_int, bs = basis, m = m) +
-
-    ti(tfi, slope, k = k_int, bs = basis, m = m) +
-    ti(tfi, wind, k = k_int, bs = basis, m = m) +
-    ti(tfi, steps, k = k_int, bs = basis, m = m) +
-
-    ti(slope, wind, k = k_int, bs = basis, m = m) +
-    ti(slope, steps, k = k_int, bs = basis, m = m) +
-
-    ti(wind, steps, k = k_int, bs = basis, m = m)
-)
 
 
 # Data for spread ---------------------------------------------------------
@@ -985,9 +965,8 @@ params_upper <- c("intercept" = ext_alpha,
                   "steps" = bb["largest", "steps_used"])
 sup <- rbind(params_lower, params_upper)
 
-# Búsqueda del máximo con previas planas pero cuadradas -------------------
 
-
+# Exploring likelihood for one fire, varying method ---------------------
 
 # first wave
 ss <- sobol(n = 600, dim = n_coef)
@@ -1349,296 +1328,48 @@ saveRDS(w17, "files/pseudolikelihood_estimation/likelihood_points_2015_58.rds")
 
 
 
-# Usando lógica de SMC para reproducir las partículas ---------------------
+# Test exploration with known functions -----------------------------------
+# unimodal skew-mvn -------------------------------------------------------
 
-# El tema de que se acumulen en ciertas zonas tiene que ver mucho con el kernel
-# que se usa. Pero algunas zonas tienen muchas partículas por culpa del kernel,
-# y no por culpa de que ahí se acumularon más por ser zonas de alta likelihood.
+d <- 6
+limit <- 10
+support <- rbind(rep(-limit, d), rep(limit, d))
 
-# Entonces, para reproducir partículas, debería usarse el weight así:
-# prior * overlap / kernel_prob,
-# donde kernel_prob es la probabilidad de que la partícula haya salido
-# del set de partículas anteriores, sumando las probs.
+# simulate parameters to create a distribution
+xis <- rnorm(d, sd = 3)
+alphas <- rnorm(d, sd = 10)
+sigmas <- rtruncnorm(d, a = 0, mean = 5, sd = 3)
+rho <- rlkjcorr(1, d, eta = 0.2)
+omega <- rho * (sigmas %*% t(sigmas))
+dp <- list(xi = xis, Omega = omega, alpha = alphas)
+smvn <- makeSECdistr(dp, family = "SN")
+plot(smvn)
 
-# first wave
-ss <- sobol(n = 1000, dim = n_coef)
-particles <- scale_params(ss, sup)
-colnames(particles) <- par_names
-sim1 <- similarity_simulate_parallel(particles, spread_data)
-colnames(sim1$par_values)
+# density for unimodal skew-mvn
+dsn_uni <- function(x, dp) { # x is a matrix, dp is the dp list
+  dd <- data.frame(y = dmsn(x, dp = dp))
+  dd$par_values <- x
+  return(dd)
+}
 
-# prior at logit scale
-particles_raw <- logit_scaled(particles, sup)
-
-sim1$prior <- logistic_prior(particles_raw) # at logit scale!!
-sim1$kernel <- 1
-sim1$weight <- sim1$overlap * sim1$prior    ## prior * overlap / 1
+# sobol seq
+ss <- sobol(n = 10000, dim = d)
+particles <- scale_params(ss, support)
+sim1 <- dsn_uni(particles, dp)
 sim1$wave <- 0
 
 
-
-# single_wave
-w1 <- explore_likelihood_kernel(sim1, n = 500, p_best = 0.15, support = sup,
-                                spread_data = spread_data)
-wave_plot(w1)
-
-
-w1 <- explore_likelihood_kernel_iterate(
-  n_waves = 10, data = sim1, n = 500, n_best = 400, support = sup,
-  spread_data = spread_data
-)
-wave_plot(w1, alpha = 0.05)
-
-
-w2 <- explore_likelihood_kernel_iterate(
-  n_waves = 10, data = w1, n = 500, n_best = 400, support = sup,
-  spread_data = spread_data
-)
-wave_plot(w2, alpha = 0.01)
-
-# no funciona, se acumulan en los extremos.
-
-# pseudolikelihood model (GAM) ---------------------------------------------
-
-
-w17 <- readRDS("files/pseudolikelihood_estimation/likelihood_points_2015_58.rds")
-colnames(w17$par_values) <- par_names
-# y ahora le ajustamos un GAM
-
-# prepare data for gam
-data_gam <- as.data.frame(cbind(w17$par_values,
-                                y = w17$overlap)) # change logit or not here, name it "y"
-
-# set gam parameters (to be evaluated by gam_formula)
-k_side <- 30; k_int <- 5; m <- 2; basis <- "cr"
-
-# # modelos logit-normal
-# system.time(
-#     mgam <- gam(gam_formula,
-#               data = data_gam, method = "REML")
-# )
-# # usa re poca memoria, no sería un problema la RAM
-# # tarda mucho. Me cansó.
-
-# betar
-mb1 <- microbenchmark(
-  model_fit = {
-    mgam_fast_beta <- bam(gam_formula, family = betar(),
-                          data = data_gam, method = "fREML",
-                          discrete = TRUE, nthreads = n_cores)
-  }, times = 1
-)
-
-# logit scale
-data_gam_logit <- as.data.frame(cbind(w17$par_values,
-                                      y = w17$overlap_logit))
-data_gam_log <- as.data.frame(cbind(w17$par_values,
-                                    y = w17$overlap_log))
-mb2 <- microbenchmark(
-  model_logit = {
-    mgam_fast_logit <- bam(gam_formula,
-                           data = data_gam_logit, method = "fREML",
-                           discrete = TRUE, nthreads = n_cores)
-  },
-  model_log = {
-    mgam_fast_log <- bam(gam_formula,
-                           data = data_gam_log, method = "fREML",
-                           discrete = TRUE, nthreads = n_cores)
-  },
-  times = 1
-)
-mb2
-
-# sd(residuals(mgam_fast_log, type = "response"))
-sd_log <- sigma(mgam_fast_log)
-sd_logit <- sigma(mgam_fast_logit)
-
-ff <- fitted(mgam_fast_logit)
-fitted_ov_invlogit_j <- numeric(nrow(data_gam_logit))
-for(i in 1:length(fitted_ov_invlogit_j)) {
-  fitted_ov_invlogit_j[i] <- momentsLogitnorm(ff[i], sd_logit)["mean"]
-}
-
-dcomp <- data.frame(
-  overlap = w17$overlap,
-  overlap_logit = w17$overlap_logit,
-  overlap_log = w17$overlap_log,
-
-  fitted_ov_invlogit = plogis(fitted(mgam_fast_logit)),
-  fitted_ov_invlogit_j = fitted_ov_invlogit_j,
-  fitted_ov_logit = fitted(mgam_fast_logit),
-
-  fitted_ov_exp = exp(fitted(mgam_fast_log)),
-  fitted_ov_exp_j = exp(fitted(mgam_fast_log) + 0.5 * sd_log ^ 2),
-  fitted_ov_log = fitted(mgam_fast_log)
-)
-
-aa <- 0.01
-par(mfrow = c(3, 2))
-plot(fitted_ov_invlogit ~ overlap, dcomp, col = rgb(0, 0, 0, aa), pch = 19); abline(0, 1, lwd = 1.5, col = "red")
-plot(fitted_ov_invlogit_j ~ overlap, dcomp, col = rgb(0, 0, 0, aa), pch = 19); abline(0, 1, lwd = 1.5, col = "red")
-plot(fitted_ov_logit ~ overlap_logit, dcomp, col = rgb(0, 0, 0, aa), pch = 19); abline(0, 1, lwd = 1.5, col = "red")
-plot(fitted_ov_exp ~ overlap, dcomp, col = rgb(0, 0, 0, aa), pch = 19); abline(0, 1, lwd = 1.5, col = "red")
-plot(fitted_ov_log ~ overlap_log, dcomp, col = rgb(0, 0, 0, aa), pch = 19); abline(0, 1, lwd = 1.5, col = "red")
-plot(fitted_ov_exp_j ~ overlap, dcomp, col = rgb(0, 0, 0, aa), pch = 19); abline(0, 1, lwd = 1.5, col = "red")
-par(mfrow = c(1, 1))
-
-
-mgam_fast_logit$sp
-
-
-# add fitted values and residuals
-w20$fitted <- plogis(fitted(mgam))
-w20$fitted_logit <- fitted(mgam)
-w20$res <- w20$fitted - w20$overlap
-w20$res_logit <- w20$fitted_logit - w20$overlap_logit
-
-# # for beta:
-# w17$fitted <- fitted(mgam_fast)
-# w17$res <- w17$fitted - w17$overlap
-
-wave_plot(w17, "overlap")
-wave_plot(w17, "fitted")
-plot(fitted ~ overlap, w17, col = rgb(0, 0, 0, 0.2), pch = 19)
-abline(0, 1, lwd = 1.5, col = "red")
-# no anduvo usando te(), pero sí con te()
-
-ccc <- cov2cor(vcov(mgam_fast))
-range(ccc[lower.tri(ccc)]) # muchos par correlated
-
-wave_plot(w17[w17$par_values[, 6] > 250, ], alpha = 0.3)
-wave_plot(w17[w17$par_values[, 6] > 250, ], response = "fitted", alpha = 0.3)
-
-
-
-
-# Pruebitas con gam -------------------------------------------------------
-
-gam_formula_te <- formula(
-  y ~ # te interactions
-    te(intercept, vfi, k = k_int_te, bs = basis, m = m) +
-    te(intercept, tfi, k = k_int_te, bs = basis, m = m) +
-    te(intercept, slope, k = k_int_te, bs = basis, m = m) +
-    te(intercept, wind, k = k_int_te, bs = basis, m = m) +
-    te(intercept, steps, k = k_int_te, bs = basis, m = m) +
-
-    te(vfi, tfi, k = k_int_te, bs = basis, m = m) +
-    te(vfi, slope, k = k_int_te, bs = basis, m = m) +
-    te(vfi, wind, k = k_int_te, bs = basis, m = m) +
-    te(vfi, steps, k = k_int_te, bs = basis, m = m) +
-
-    te(tfi, slope, k = k_int_te, bs = basis, m = m) +
-    te(tfi, wind, k = k_int_te, bs = basis, m = m) +
-    te(tfi, steps, k = k_int_te, bs = basis, m = m) +
-
-    te(slope, wind, k = k_int_te, bs = basis, m = m) +
-    te(slope, steps, k = k_int_te, bs = basis, m = m) +
-
-    te(wind, steps, k = k_int_te, bs = basis, m = m)
-)
-# cambiar
-mb3 <- microbenchmark(
-  model_logit = {
-    k_int_te <- 6
-    mgam_fast_logit_te <- bam(gam_formula_te,
-                           data = data_gam_logit, method = "fREML",
-                           discrete = TRUE, nthreads = n_cores)
-  },
-  times = 1
-)
-mb3
-summary(mgam_fast_logit_te)
-plot(mgam_fast_logit_te)
-plot(plogis(fitted(mgam_fast_logit_te)) ~ w17$overlap)
-length(coef(mgam_fast_logit_te))
-names(coef(mgam_fast_logit_te))
-
-names(coef(mgam_fast_logit)[-1])
-
-k_side <- 31
-klist <- lapply(1:n_coef, function(i) {
-  seq(sup[1, i], sup[2, i], length.out = k_side)
-})
-names(klist) <- par_names
-
-k_int <- 11 # 5 * 5
-# m_logit_knots <- bam(
-#   gam_formula, data = data_gam_logit, method = "fREML", discrete = TRUE,
-#   nthreads = n_cores, knots = klist
-# )
-
-
-m_logit_more <- bam(
-  gam_formula, data = data_gam_logit, method = "fREML", discrete = TRUE,
-  nthreads = n_cores, gamma = 0.01#, knots = klist
-)
-summary(m_logit_more)
-
-plot(plogis(fitted(m_logit_more)) ~ w17$overlap,
-     col = rgb(0, 0, 0, 0.01), pch = 19)
-
-plot(plogis(fitted(m_logit_more)) - w17$overlap ~ w17$overlap,
-     col = rgb(0, 0, 0, 0.05), pch = 19)
-
-# Estudiar cómo proveer knots a ambas partes y luego
-(10^2)*15
-
-
-# con 10 bases por lado en las interacciones anda bien.
-#
-m_logit_more$smooth[[1]] %>% str # intercept
-m_logit_more$smooth[[7]] %>% str # intercept,vfi
-m_logit_more$smooth[[1]] %>% str # intercept
-
-plot(m_logit_more$smooth[[1]]$xp)
-plot(m_logit_more$smooth[[6]]$xp)
-
-plot(m_logit_more$smooth[[11]]$xp)
-
-# Igual parece que los knots están re bien puestos.
-
-
-# hacer pred parciales, comparar posteriores, y bla.
-
-
-# Partial predictions -----------------------------------------------------
-
-k_side <- 30 +1
-k_int <- 10 + 1 # 5 * 5
-m = 1; basis = "cr"
-
-models_list <- lapply(c(1e-12, 0.01, 0.5, 1), function(g) {
-  m <- bam(
-    gam_formula, data = data_gam_logit, method = "fREML", discrete = TRUE,
-    nthreads = n_cores, gamma = g
-  )
-
-  plot(plogis(fitted(m)) ~ w17$overlap, col = rgb(0, 0, 0, 0.01), pch = 19,
-       main = g)
-
-  return(m)
-})
-
-
-
-# Uniform prior at logit scale? -------------------------------------------
-
-rr <- runif(1e6)
-qq <- qlogis(rr)
-plot(density(qq))
-curve(dlogis(x), add = T, col = "red")
-curve(dnorm(x), add = T, col = "blue")
-# flat prior in [0, 1] implies logistic distribution at the logit scale.
-
-# this implies we can compute the prior at the flat prior transformed
-# to the logit scale :)
-
-qq <- rlogis(1e6)
-rr <- plogis(qq)
-plot(density(rr, from = 0, to = 1))
-plot(quantile(rr, ppoints(100)) ~ ppoints(100)); abline(0, 1)
-
-
+t1 <- explore_test_iterate(n_waves = 10, data = sim1, n = 10000, var_factor = 1,
+                           p_best = 0.15, fn = dsn_uni,
+                           support = support, centre = "global",
+                           sobol = TRUE, dp = dp)
+nrow(t1)
+t1sub <- t1[order(t1$y, decreasing = T)[1:10000], ]
+wave_plot(t1sub, response = "y")
+summary(t1$y)
+# como la función es muy picuda, se concentra en un punto y no muestrea más que
+# eso. habría que tunearle el kernel de reproducción, pero da fiaca.
+# Vamos a comparar directamente el MCMC usando el surrogate y sin usarlo.
 
 # TAREA -------------------------------------------------------------------
 
@@ -1647,4 +1378,17 @@ plot(quantile(rr, ppoints(100)) ~ ppoints(100)); abline(0, 1)
 # Tunear la seq de varianzas locales.
 # Ver cómo combinar local-global.
 # Agrandar límites a [-50, 50].
+
+
+# Comparing simulation-based y surrogate-based MCMC -----------------------
+
+
+
+
+
+
+
+
+
+
 
