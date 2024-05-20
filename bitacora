@@ -212,3 +212,24 @@ Comenzando con cuestiones de estimación.
 - Si está muy mal, hacer modelo jerárquico con ABC-Gibbs
 
 
+
+--------------------------------------------------------------------------------
+
+2024-04-16
+
+archivos viejos dirán "wind-variable".
+
+Ajusté las posteriores individuales con velocidad de viento variable entre
+incendios, a nivel de paisaje, usando los datos diarios del ERA5. Eso muestra que 
+el beta del viento tiene una relación negativa con la vel paisaje. Entonces,
+para no embarrar, usaré una velocidad de viento fija en todos los fuegos.
+Variará sólo la dirección.
+
+Esto hará que todo cambie. Además, calcularé los índices de vegetación y de
+topografía en R, no en GEE, de modo que un raster de variables ambientales sea
+el único input necesario.
+
+Reajustaré los índices usando exactamente los mismos datos del paper de patrones,
+para que pueda citarlo. Para eso hay que editar el código de landscape_flammability.
+
+Idealmente, automatizaré la generación de capas de viento, usando WindNinja_cli.

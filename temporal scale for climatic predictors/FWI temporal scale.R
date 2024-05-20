@@ -187,6 +187,9 @@ fires <- fires[-uncertain, ]
 
 fwi_data <- read.csv("data/climatic_data_by_fire_fwi.csv")
 
+# one fire is not within the fwi data, remove.
+fires <- fires[fires$fire_id %in% fwi_data$fire_id, ]
+
 # Turn dates into dates
 dd <- c("date_start", "date_end", "date_l")
 for(d in dd) fwi_data[, d] <- as.Date(fwi_data[, d])
@@ -240,6 +243,8 @@ delta_sat_th <- fires$date - fires$middate_sat
 # get mean aggregated over week, fortnite and month
 fwi_agg <- do.call("rbind", lapply(fires$fire_id, function(f) {
   # f = fires$fire_id[41]
+  print(f)
+  # f = "2016_-325507625"
 
   # get fwi values
   row <- which(fires$fire_id == f)
@@ -511,7 +516,7 @@ cum_agg_fit <- function(period = c("day", "week", "fortnight", "month"),
 
 day_fit <- cum_agg_fit("day", light = FALSE) # ok
 week_fit <- cum_agg_fit("week") # ok
-fortnight_fit <- cum_agg_fit("fortnight") # ok
+fortnight_fit <- cum_agg_fit("fortnight", light = FALSE) # ok
 month_fit <- cum_agg_fit("month") # okok
 
 fwi_cum <- cbind(day_fit, week_fit, fortnight_fit, month_fit)
@@ -766,4 +771,114 @@ export <- cbind(
 )
 
 write.csv(export, "data/climatic_data_by_fire_fwi-day-cumulative.csv",
+          row.names = F)
+
+
+
+# export data with FWI cumulative values (using all fires! -- FORTNIGHT) ------
+
+# get data for the previous and focal fortnight
+# this repeats the beginning of the cum_fit
+period <- "fortnight"
+fwi_list <- lapply(fires$fire_id, function(f) {
+  # f = fires_sub$fire_id[1]
+
+  # get fwi values
+  row <- which(fires$fire_id == f)
+  dtemp <- fwi_data[fwi_data$fire_id == f, , drop = F]
+  fwi_vals <- dtemp[1, grep("fwi", names(fwi_data))] %>% as.numeric
+  # subset focal dates
+  date_seq_av <- seq(dtemp$date_start, dtemp$date_end, 1)
+  middate <- fires$date[row]
+
+  if(length(date_seq_av) != length(fwi_vals)) stop("Date sequence does not match FWI values.")
+
+  dd <- data.frame(fwi = fwi_vals,
+                   day = date_seq_av,
+                   week = week(date_seq_av),
+                   month = month(date_seq_av),
+                   year = year(date_seq_av))
+
+  dd <- dd[order(dd$day), ]
+
+  # if there is a year change in the period, restart weeks backwards from
+  # december 31st. This is because the 7-day counting may create a last week
+  # with too few days.
+  if(max(diff(dd$year)) == 1) {
+    restart <- dd$year == min(dd$year)
+    weeks_n <- ceiling(sum(restart) / 7)
+    week_tmp <- rep(seq(0, -(weeks_n - 1)), each = 7)[1:sum(restart)]
+    week_use <- rev(week_tmp)
+    dd$week[restart] <- week_use
+  }
+
+  # create fortnight, centered at the new year
+  odd_weeks <- (dd$week %% 2) == 0
+  dd$fortnight <- dd$week
+  dd$fortnight[odd_weeks & dd$week > 0] <- dd$week[odd_weeks & dd$week > 0] - 1
+  dd$fortnight[!odd_weeks & dd$week < 0] <- dd$week[!odd_weeks & dd$week < 0] + 1
+
+  dd_mid <- dd[dd$day == middate, , drop = F]
+
+  # subset dd using only the focal and previous periods
+  dd_sub <- dd[dd[, period] <= dd_mid[, period], ]
+  dd_sub$period <- dd_sub[, period]
+
+  # aggregate fwi by period
+  if(period != "day") {
+    dd_agg <- aggregate(fwi ~ period, dd_sub, mean)
+    dd_agg$period <- -(nrow(dd_agg) - 1):0
+    return(dd_agg)
+  } else {
+    dd_agg <- dd_sub[, c("period", "fwi")]
+    dd_agg$period <- -(nrow(dd_agg) - 1):0
+    dd_agg <- dd_agg[dd_agg$period >= -120, ]
+    return(dd_agg)
+  }
+
+})
+min_periods <- lapply(fwi_list, nrow) %>% unlist %>% min
+
+fwi_periods <- do.call("rbind", lapply(fwi_list, function(x) {
+  # x <- fwi_fort_list[[1]]
+  xx <- x[order(x$period, decreasing = TRUE), ]
+  fw <- xx$fwi[1:min_periods]
+  mm <- matrix(fw, 1)
+  colnames(mm) <- xx$period[1:min_periods]
+  return(mm)
+}))
+
+# extract correlation parameters to compute the cumulative FWI
+map_iter_expquad <- which.max(as.numeric(as.matrix(fortnight_fit$m_expquad, "lp__")))
+ls_hat <- as.matrix(fortnight_fit$m_expquad, "ls")[map_iter_expquad]
+
+map_iter_exp <- which.max(as.numeric(as.matrix(fortnight_fit$m_exp, "lp__")))
+rho_hat <- as.matrix(fortnight_fit$m_exp, "rho")[map_iter_exp]
+
+# cumulative fwi
+timeseq <- 0:(min_periods-1)
+w_expquad <- normalize(exp(-(timeseq / ls_hat) ^ 2))
+fwi_expquad <- fwi_periods %*% w_expquad
+
+w_exp <- normalize(rho_hat ^ (timeseq / fortnight_fit$sdata_exp$time_scale_exp))
+fwi_exp <- fwi_periods %*% w_exp
+
+# return the focal value and the cumulative values
+dat <- data.frame(
+  "focal" = fwi_periods[, 1],
+  "expquad" = fwi_expquad,
+  "exp" = fwi_exp
+)
+
+names(dat) <- c("fwi_focal_fortnight", "fwi_expquad_fortnight", "fwi_exp_fortnight")
+export <- cbind(
+  fires[, c("fire_id", "date", "date_l", "date_u", "date_lr", "date_ur", "obs",
+            "datediff", "area_ha")],
+  dat
+)
+
+# check
+# pairs(export[, c("fwi_focal_fortnight", "fwi_expquad_fortnight", "fwi_exp_fortnight")])
+
+write.csv(export, "data/climatic_data_by_fire_fwi-fortnight-cumulative.csv",
           row.names = F)
