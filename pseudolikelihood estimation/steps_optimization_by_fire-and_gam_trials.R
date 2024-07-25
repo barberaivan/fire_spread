@@ -1,74 +1,46 @@
 # This code inherits from
-# <single fire posterior - surrogate vs. simulator - extended.R>.
+# <pseudolikelihood_estimation_ig-known.R>.
 
-# There I tried many ways to fit a good surrogate model, and also tried to
-# get a surrogate for a kernel-transformed similarity. But that did not work.
-
-# The current solution is to define an overlap threshold and fit a binary GAM
-# to predict where the overlap is above the threshold. To fit the mixed model,
-# we would sample the probability, not simulating the Bernoulli event.
-
-# The current problem is that the surrogate has high uncertainty in some regions
-# of the parameter space, generating bias in the resulting posterior.
-# Here I simulate more data and refit the model a few times to get reasonable
-# uncertainty where it is too high (model-based design).
+# Here I simply try to explore the overlap function for each fire to get a
+# point estimate of the steps parameter. The overlap function exploration scheme
+# is modified to spend less time in areas with low overlap. Trials were made in
+# <single fire posterior - optimizing steps by fire.R>
 
 # Packages ----------------------------------------------------------------
 
 library(tidyverse); theme_set(theme_bw())
-library(viridis)
-library(ggdensity) # geom_hdr
 
 library(Rcpp)
 library(terra)
 library(abind)         # manage arrays
 
 library(randtoolbox)   # sobol sequences
-library(mgcv)          # fit GAM
 library(MGMM)          # fit MVN distribution
 library(Matrix)        # nearPD, searches the closest PD matrix.
 library(stutils)       # tryNULL, for search of nearPD
-library(logitnorm)
-
-library(sn)
-library(trialr) # rlkjcorr
-library(truncnorm)
-
-library(adaptMCMC)
-library(posterior)     # manage posterior samples
-library(tidybayes)     # not sure if this was used
-library(bayesplot)     # visualize posteriors
+library(mgcv)
 
 library(foreach)       # parallelization
 library(doMC)          # doRNG had problems with cpp functions
 
 library(FireSpread)    # spread and similarity functions
 
-library(microbenchmark)
-
 source(file.path("..", "FireSpread", "tests", "testthat", "R_spread_functions.R"))
 # for rast_from_mat and a few constants
-
-# source("estimation_functions.R") # prior_dist and other stuff
-
-# Multicore settings -----------------------------------------------------
-
-n_cores <- 15
-registerDoMC(n_cores)
 
 # Constants --------------------------------------------------------------
 
 data_dir <- file.path("data", "focal fires data", "landscapes")
 filenames <- list.files(data_dir)
 
+# dir to save output
+target_dir <- file.path("files", "steps_optimization")
+
 # load file with constants to standardize
 ndvi_params <- readRDS(file.path("data", "NDVI_regional_data",
                                  "ndvi_optim_and_proportion.rds"))
 
 slope_sd <- ndvi_params$slope_term_sd
-
-# dir to save output
-target_dir <- file.path("files", "pseudolikelihood_estimation")
 
 # constants for fire spread simulation
 upper_limit <- 1
@@ -77,8 +49,7 @@ par_names <- c("forest", "shrubland", "grassland",
                "ndvi", "north", "elev", "slope", "wind",
                "steps")
 
-# number of fires to simulate by particle
-n_rep <- 20
+n_rep <- 20 # fires simulated by particle
 
 ext_alpha <- 50
 ext_beta <- 30
@@ -103,151 +74,23 @@ params_upper <- c("forest" = ext_alpha,
                   "wind" = ext_beta,
                   "steps" = NA)       # to be filled later, varies by fire
 
+# Parameter space exploration settings
 
-## PROBAMOS ELIMINANDO DIMENSIONES
-params_lower <- c("forest" = -ext_alpha,
-                  "shrubland" = -ext_alpha,
-                  "grassland" = -ext_alpha,
-                  "ndvi" = -1e-5,
-                  "north" = -1e-5,
-                  "elev" = -ext_beta,#-1e-5,
-                  "slope" = 0,
-                  "wind" = 0,
-                  "steps" = 5)
+# Sobol phase settings
+sobol_n <- 1000
+kw <- 4
+npw_sobol <- sobol_n / kw
 
-params_upper <- c("forest" = ext_alpha,
-                  "shrubland" = ext_alpha,
-                  "grassland" = ext_alpha,
-                  "ndvi" = 1e-5,
-                  "north" = 1e-5,
-                  "elev" = 0, #1e-5,
-                  "slope" = ext_beta / slope_sd, # because it is not standardized
-                  "wind" = ext_beta,
-                  "steps" = NA)       # to be filled later, varies by fire
+# Maximization settings
+npw_maxim <- 100
+maxim_n <- 7000   # get 8000 particles in total, 4 + 70 waves
+n_best <- 50
+vf <- c(1.5, 2, 1, 3) # variance factors for explore_likelihood
 
-gam_formula_bern_full <- formula(
-  y ~
-    # marginal effects
-    s(forest, bs = basis, k = k_side) +
-    s(shrubland, bs = basis, k = k_side) +
-    s(grassland, bs = basis, k = k_side) +
-    s(ndvi, bs = basis, k = k_side) +
-    s(north, bs = basis, k = k_side) +
-    s(elev, bs = basis, k = k_side) +
-    s(slope, bs = basis, k = k_side) +
-    s(wind, bs = basis, k = k_side) +
-    s(steps, bs = basis, k = k_side) +
+# Multicore settings
+n_cores <- 15
 
-    # interactions (intercepts)
-    ti(forest, ndvi, k = k_int, bs = basis) +
-    ti(forest, north, k = k_int, bs = basis) +
-    ti(forest, elev, k = k_int, bs = basis) +
-    ti(forest, slope, k = k_int, bs = basis) +
-    ti(forest, wind, k = k_int, bs = basis) +
-
-    ti(shrubland, ndvi, k = k_int, bs = basis) +
-    ti(shrubland, north, k = k_int, bs = basis) +
-    ti(shrubland, elev, k = k_int, bs = basis) +
-    ti(shrubland, slope, k = k_int, bs = basis) +
-    ti(shrubland, wind, k = k_int, bs = basis) +
-
-    ti(grassland, ndvi, k = k_int, bs = basis) +
-    ti(grassland, north, k = k_int, bs = basis) +
-    ti(grassland, elev, k = k_int, bs = basis) +
-    ti(grassland, slope, k = k_int, bs = basis) +
-    ti(grassland, wind, k = k_int, bs = basis) +
-
-    # other interactions
-    ti(elev, slope, k = k_int, bs = basis) +
-    ti(elev, wind, k = k_int, bs = basis) +
-    ti(elev, ndvi, k = k_int, bs = basis) +
-    ti(slope, wind, k = k_int, bs = basis) +
-    ti(north, ndvi, k = k_int, bs = basis)
-)
-
-# sin las dimensiones quitadas
-gam_formula_bern_reduced <- formula(
-  y ~
-    # marginal effects
-    s(forest, bs = basis, k = k_side) +
-    s(shrubland, bs = basis, k = k_side) +
-    s(grassland, bs = basis, k = k_side) +
-    # s(ndvi, bs = basis, k = k_side) +
-    # s(north, bs = basis, k = k_side) +
-    # s(elev, bs = basis, k = k_side) +
-    s(slope, bs = basis, k = k_side) +
-    s(wind, bs = basis, k = k_side) +
-    s(steps, bs = basis, k = k_side) +
-
-    # interactions (intercepts)
-    # ti(forest, ndvi, k = k_int, bs = basis) +
-    # ti(forest, north, k = k_int, bs = basis) +
-    # ti(forest, elev, k = k_int, bs = basis) +
-    ti(forest, slope, k = k_int, bs = basis) +
-    ti(forest, wind, k = k_int, bs = basis) +
-
-    # ti(shrubland, ndvi, k = k_int, bs = basis) +
-    # ti(shrubland, north, k = k_int, bs = basis) +
-    # ti(shrubland, elev, k = k_int, bs = basis) +
-    ti(shrubland, slope, k = k_int, bs = basis) +
-    ti(shrubland, wind, k = k_int, bs = basis) +
-
-    # ti(grassland, ndvi, k = k_int, bs = basis) +
-    # ti(grassland, north, k = k_int, bs = basis) +
-    # ti(grassland, elev, k = k_int, bs = basis) +
-    ti(grassland, slope, k = k_int, bs = basis) +
-    ti(grassland, wind, k = k_int, bs = basis) +
-
-    # other interactions
-    # ti(elev, slope, k = k_int, bs = basis) +
-    # ti(elev, wind, k = k_int, bs = basis) +
-    # ti(elev, ndvi, k = k_int, bs = basis) +
-    ti(slope, wind, k = k_int, bs = basis) #+
-  # ti(north, ndvi, k = k_int, bs = basis)
-)
-
-# incluyendo alguna dimensión que no haga nada: elev con sus interaccs
-gam_formula_bern_extra <- formula(
-  y ~
-    # marginal effects
-    s(forest, bs = basis, k = k_side) +
-    s(shrubland, bs = basis, k = k_side) +
-    s(grassland, bs = basis, k = k_side) +
-    # s(ndvi, bs = basis, k = k_side) +
-    # s(north, bs = basis, k = k_side) +
-    s(elev, bs = basis, k = k_side) +
-    s(slope, bs = basis, k = k_side) +
-    s(wind, bs = basis, k = k_side) +
-    s(steps, bs = basis, k = k_side) +
-
-    # interactions (intercepts)
-    # ti(forest, ndvi, k = k_int, bs = basis) +
-    # ti(forest, north, k = k_int, bs = basis) +
-    # ti(forest, elev, k = k_int, bs = basis) +
-    ti(forest, slope, k = k_int, bs = basis) +
-    ti(forest, wind, k = k_int, bs = basis) +
-
-    # ti(shrubland, ndvi, k = k_int, bs = basis) +
-    # ti(shrubland, north, k = k_int, bs = basis) +
-    # ti(shrubland, elev, k = k_int, bs = basis) +
-    ti(shrubland, slope, k = k_int, bs = basis) +
-    ti(shrubland, wind, k = k_int, bs = basis) +
-
-    # ti(grassland, ndvi, k = k_int, bs = basis) +
-    # ti(grassland, north, k = k_int, bs = basis) +
-    # ti(grassland, elev, k = k_int, bs = basis) +
-    ti(grassland, slope, k = k_int, bs = basis) +
-    ti(grassland, wind, k = k_int, bs = basis) +
-
-    # other interactions
-    ti(elev, slope, k = k_int, bs = basis) +
-    ti(elev, wind, k = k_int, bs = basis) +
-    # ti(elev, ndvi, k = k_int, bs = basis) +
-    ti(slope, wind, k = k_int, bs = basis) #+
-  # ti(north, ndvi, k = k_int, bs = basis)
-)
 # Functions ---------------------------------------------------------------
-
 normalize <- function(x) x / sum(x)
 
 # Simulate fires and compare then with the observed one using the overlap_spatial
@@ -292,8 +135,8 @@ similarity_simulate_particle_metrics <- function(particle, fire_data = NULL,
   metrics <- matrix(NA, n_sim, 3)
   colnames(metrics) <- c("overlap", "size_diff", "steps_used")
 
-  # simulate and compute metrics
-  for(i in 1:n_sim) { # simulated fires by particle
+  for(i in 1:n_sim) {
+    # simulate and compute metrics
     fire_sim <- simulate_fire_compare(
       landscape = fire_data$landscape[, , -1],
       vegetation = fire_data$landscape[, , 1],
@@ -313,20 +156,7 @@ similarity_simulate_particle_metrics <- function(particle, fire_data = NULL,
     metrics[i, "steps_used"] <- fire_sim$steps_used
   }
 
-  mo <- mean(metrics[, "overlap"])
-  # extract values
-  ll_summ <- c(
-    overlap = mo,
-    overlap_log = log(mo),
-    overlap_logit = qlogis(mo),
-    overlap_var = var(metrics[, "overlap"]),       # variance in original scale
-    ll = qlogis(mo),
-    var = var(metrics[, "overlap"]), # same as overlap_var, but kept for compatibility
-    size_diff = mean(metrics[, "size_diff"]),
-    steps_used = mean(metrics[, "steps_used"])
-  )
-
-  return(ll_summ)
+  return(colMeans(metrics))
 }
 
 # Emulate the loglik over a list of particles in parallel. Returns the metrics
@@ -361,10 +191,15 @@ similarity_simulate_parallel <- function(particles_mat = NULL,
 }
 
 # get_bounds: computes the metrics for the largest and smallest fires possible
-get_bounds <- function(fire_data, n_sim = n_rep) {
+get_bounds <- function(fire_data, n_sim = 1) {
 
-  coef_burn_all <- c(1e6, rep(0, n_coef - 1))
-  coef_burn_none <- c(-1e6, rep(0, n_coef - 1))
+  coef_burn_all <- numeric(n_coef) # intercepts, slopes, steps
+  coef_burn_all[1:3] <- 1e9  # intercepts
+  coef_burn_all[n_coef] <- 0 # steps (0 means no limit)
+
+  coef_burn_none <- numeric(n_coef) # intercepts, slopes, steps
+  coef_burn_none[1:3] <- 1e-9  # intercepts
+  coef_burn_none[n_coef] <- 1  # steps
 
   small_fire <- similarity_simulate_particle_metrics(coef_burn_none,
                                                      fire_data = fire_data,
@@ -381,7 +216,11 @@ get_bounds <- function(fire_data, n_sim = n_rep) {
 }
 
 wave_plot <- function(data, response = "overlap", alpha = 0.3, best = NULL,
-                      x = "par_values", thres = NULL, bin = FALSE) {
+                      x = "par_values", thres = NULL, bin = FALSE, title = NULL,
+                      rc = c(3, 3)) {
+
+  par_names <- colnames(data$par_values)
+  n_coef <- length(par_names)
 
   if(!is.null(best)) {
     data <- data[order(data[, response], decreasing = TRUE), ]
@@ -396,11 +235,13 @@ wave_plot <- function(data, response = "overlap", alpha = 0.3, best = NULL,
   yy[2] <- yy[2] * 1.05
 
   # title for first plot
-  tit <- deparse(substitute(data))
+  if(is.null(title)) {
+    title <- deparse(substitute(data))
+  }
 
-  par(mfrow = c(3, 3))
+  par(mfrow = c(rc[1], rc[2]))
   for(i in 1:n_coef) {
-    mm <- ifelse(i == 1, tit, NA)
+    mm <- ifelse(i == 1, title, NA)
     plot(data[, response] ~ data[, x][, i], ylab = response,
          xlab = par_names[i], ylim = yy, main = mm,
          pch = 19, col = rgb(0, 0, 0, alpha))
@@ -416,7 +257,6 @@ wave_plot <- function(data, response = "overlap", alpha = 0.3, best = NULL,
   }
   par(mfrow = c(1, 1))
 }
-
 
 # https://rpubs.com/binhho660/922614
 #' rmvn by hand, Covariance parameterization, or maybe from a sobol sequence
@@ -586,10 +426,10 @@ explore_likelihood <- function(data, n = 600, var_factor = 1, n_best = "all",
                                phase = NULL) {
 
   ### Testo
-  # data = wave1; n = 500; p_best = 0.15; prob_fn = NULL;
+  # data = sim1; n = 500; p_best = 0.15; prob_fn = NULL;
   # support = sup; spread_data = spread_data;
   # centre = "global"; sobol = TRUE;
-  # pow = 1; var_factor = 1; accept_thres = NULL
+  # pow = 1; var_factor = 1
   ### endo testo
 
   # if threshold is used, ignore p_best
@@ -615,7 +455,7 @@ explore_likelihood <- function(data, n = 600, var_factor = 1, n_best = "all",
   weight <- data$overlap
 
   # sometimes the best particles are too few, and the computation of the vcov
-  # fails. In these cases we need to smooth a bit the weights, so more than 20
+  # fails. In these cases we need to smooth a bit the weights, so >= 30
   # different particles are resampled.
   l <- 0
   k <- 0 # smoothing power (root)
@@ -722,22 +562,6 @@ explore_likelihood_iterate <- function(
 
   return(res)
 }
-
-# Function to perform adaptive MCMC in parallel by hand. It's just a wrapper
-# for adaptMCMC::MCMC, because MCMC.parallel does not allow to fix the inits.
-MCMC_parallel <- function(fun, n, adapt, scale, init_list, acc.rate = 0.234,
-                          n_chains, n_cores, ...) {
-
-  registerDoMC(n_cores)
-
-  runs <- foreach(pp = init_list) %dopar% {
-    MCMC(p = fun, n = n, adapt = adapt, scale = scale, init = pp,
-         acc.rate = acc.rate, ...)
-  }
-
-  return(runs)
-}
-
 
 # make prob = 0 in particles with high uncertainty, measured as the width of the
 # 95 % confidence interval (unc).
@@ -899,103 +723,181 @@ reduce_support <- function(x, support, prop = 0.75) {
   return(rnew)
 }
 
+# Loop over fires -------------------------------------------------------
 
-# Simulation waves ---------------------------------------------------------
+for(f in 1:length(filenames)) {
 
-fire_file <- "2000_34.rds"#"2000_8.rds"#"2015_53.rds"#"2008_3.rds" #"1999_25j.rds"#"2008_3.rds" #
-fire_name <- strsplit(fire_file, ".rds")[[1]]
-print(paste("Fire:", fire_name))
-full_data <- readRDS(file.path(data_dir, fire_file))
+  fire_file <- filenames[f]
+  fire_name <- strsplit(fire_file, ".rds")[[1]]
+  print(paste("Fire:", fire_name))
+
+  if(fire_name == "2015_50") {
+    registerDoMC(12) # to avoid errors in some cores, which are likely due to ram issues
+  } else {
+    registerDoMC(n_cores)
+  }
+
+  full_data <- readRDS(file.path(data_dir, fire_file))
+  # subset data needed for spread (to be cloned across workers)
+  spread_data <- full_data[c("landscape", "ig_rowcol",
+                             "burned_layer", "burned_ids")]
+
+  bb <- get_bounds(fire_data = spread_data)
+  params_upper["steps"] <- bb["largest", "steps_used"]
+  sup <- rbind(params_lower, params_upper)
+
+  # Sobol phase
+  ss <- sobol(n = sobol_n, dim = n_coef)
+  particles <- scale_params(ss, sup)
+  waves_1 <- rep(1:kw, each = npw_sobol)
+
+  # loop to save intermediate results
+  wave1 <- NULL
+  print("Sobol phase.")
+  for(w in 1:kw) {
+    # w = 1
+    wlocal <- similarity_simulate_parallel(particles[waves_1 == w, ],
+                                           spread_data)
+    wlocal$wave <- w
+    wlocal$phase <- "sobol"
+    colnames(wlocal$par_values) <- par_names
+
+    nn <- paste(fire_name, "-wave-", w, ".rds", sep = "")
+    saveRDS(wlocal, file.path(target_dir, nn))
+
+    wave1 <- rbind(wave1, wlocal)
+    rr <- round(max(wave1$overlap), 4)
+    # print(paste("wave ", w, ", overlap max: ", rr, sep = ""))
+
+    mm <- paste("wave ", w, ", overlap max: ", rr, sep = "")
+    message(mm)
+  }
+
+  print("Maximum search.")
+
+  wave2 <- explore_likelihood_iterate(
+    n_waves = maxim_n / npw_maxim, n = npw_maxim, n_best = n_best,
+    var_factor = vf, data = wave1,
+    support = sup, spread_data = spread_data,
+    centre = "global", sobol = TRUE, phase = "search_maximum",
+    write = T, fire_name = fire_name
+  )
+
+  # save final result
+  nn <- paste(fire_name, "-steps_optimization_simulations.rds", sep = "")
+  saveRDS(wave2, file.path(target_dir, nn))
+
+  # save wave plot
+  nn <- paste(fire_name, "-steps_optimization_plot.png", sep = "")
+  png(filename = file.path(target_dir, nn),
+      width = 15, height = 16, units = "cm", res = 300)
+  wave_plot(wave2, title = fire_name, alpha = 0.2)
+  dev.off()
+
+  # remove intermediate files
+  all_files_saved <- list.files(target_dir, pattern = "-wave-")
+  invisible(lapply(all_files_saved, function(f) unlink(file.path(target_dir, f))))
+
+  # clean
+  remove(full_data, spread_data, wave1, wave2)
+  gc()
+}
+#endline
+
+# Exploring results -------------------------------------------------------
+
+# obtain the mean overlap in the best 50 particles of each fire.
+
+sim_files <- list.files(target_dir, pattern = "-steps_optimization_simulations.rds")
+
+ov_mean <- sapply(sim_files, function(x) {
+  d <- readRDS(file.path(target_dir, x))
+  ids <- order(d$overlap, decreasing = T)[1:50]
+  return(mean(d$overlap[ids]))
+})
+
+hist(ov_mean, xlim = c(0, 1), breaks = 7)
+abline(v = mean(ov_mean), lty = 2)
+
+# Choose fire ------------------------------------------------------------
+
+fire_name <- "2000_8"
+file_name <- sim_files[grep(fire_name, sim_files)]
+like_sim <- readRDS(file.path(target_dir, file_name))
+
+delta_thres <- 0.05
+
+sup <- rbind(params_lower, params_upper)
+sup[2, "steps"] <- round(max(like_sim$par_values[, "steps"]))
+
+# load landscape to simulate
+land_file <- filenames[grep(fire_name, filenames)]
+
+if(fire_name == "2015_50") {
+  registerDoMC(12) # to avoid errors in some cores, which are likely due to ram issues
+} else {
+  registerDoMC(n_cores)
+}
+
+full_data <- readRDS(file.path(data_dir, land_file))
 # subset data needed for spread (to be cloned across workers)
 spread_data <- full_data[c("landscape", "ig_rowcol",
                            "burned_layer", "burned_ids")]
 
-bb <- get_bounds(fire_data = spread_data)
-sup <- rbind(params_lower, params_upper)
-sup[2, "steps"] <- bb["largest", "steps_used"]
 
-# Explore likelihood
-# Phase 1: sobol
-registerDoMC(15)
+# Fit GAM -----------------------------------------------------------------
 
-ss <- sobol(n = 10000, dim = n_coef)
-particles <- scale_params(ss, sup)
-waves_1 <- rep(1:20, each = 500)
-# loop to save
-wave1 <- NULL
-print(paste("Phase: sobol. Fire: ", fire_name, sep = ""))
-for(w in 1:20) {
-  # w = 1
-  wlocal <- similarity_simulate_parallel(particles[waves_1 == w, ],
-                                         spread_data)
-  wlocal$wave <- w
-  wlocal$phase <- "sobol"
-  colnames(wlocal$par_values) <- par_names
+gam_formula_bern <- formula(
+  y ~
+    # marginal effects
+    s(forest, bs = basis, k = k_side) +
+    s(shrubland, bs = basis, k = k_side) +
+    s(grassland, bs = basis, k = k_side) +
+    s(ndvi, bs = basis, k = k_side) +
+    s(north, bs = basis, k = k_side) +
+    s(elev, bs = basis, k = k_side) +
+    s(slope, bs = basis, k = k_side) +
+    s(wind, bs = basis, k = k_side) +
+    s(steps, bs = basis, k = k_side) +
 
-  # nn <- paste(fire_name, "-wave-", w, ".rds", sep = "")
-  # saveRDS(wlocal, file.path(target_dir, nn))
+    # interactions (intercepts)
+    ti(forest, ndvi, k = k_int, bs = basis) +
+    ti(forest, north, k = k_int, bs = basis) +
+    ti(forest, elev, k = k_int, bs = basis) +
+    ti(forest, slope, k = k_int, bs = basis) +
+    ti(forest, wind, k = k_int, bs = basis) +
 
-  wave1 <- rbind(wave1, wlocal)
-  rr <- round(max(wave1$overlap), 4)
-  print(paste("wave ", w, ", overlap max: ", rr, sep = ""))
-}
+    ti(shrubland, ndvi, k = k_int, bs = basis) +
+    ti(shrubland, north, k = k_int, bs = basis) +
+    ti(shrubland, elev, k = k_int, bs = basis) +
+    ti(shrubland, slope, k = k_int, bs = basis) +
+    ti(shrubland, wind, k = k_int, bs = basis) +
 
-# wave 2: reproduce 15 % best (500 * 20 = 10000)
-print(paste("Phase: search higher. Fire: ", fire_name, sep = ""))
-wave2 <- explore_likelihood_iterate(
-  n_waves = 20, data = wave1, n = 500, p_best = 0.15,
-  var_factor = c(1.5, 2, 1),
-  support = sup, spread_data = spread_data,
-  centre = "global", sobol = TRUE, phase = "search_higher",
-  write = F, fire_name = fire_name
-)
-# wave_plot(wave2)
+    ti(grassland, ndvi, k = k_int, bs = basis) +
+    ti(grassland, north, k = k_int, bs = basis) +
+    ti(grassland, elev, k = k_int, bs = basis) +
+    ti(grassland, slope, k = k_int, bs = basis) +
+    ti(grassland, wind, k = k_int, bs = basis) +
 
-# 10000 iter reproducing the 100 best, to reach the max
-print(paste("Phase: search maximum. Fire: ", fire_name, sep = ""))
-wave4 <- explore_likelihood_iterate(
-  n_waves = 100, data = wave2, n = 100, n_best = 100,
-  var_factor = c(1.5, 2, 1),
-  support = sup, spread_data = spread_data,
-  centre = "global", sobol = TRUE, phase = "search_maximum",
-  write = F, fire_name = fire_name
+    # other interactions
+    ti(elev, slope, k = k_int, bs = basis) +
+    ti(elev, wind, k = k_int, bs = basis) +
+    ti(elev, ndvi, k = k_int, bs = basis) +
+    ti(slope, wind, k = k_int, bs = basis) +
+    ti(north, ndvi, k = k_int, bs = basis)
 )
 
-thres <- max(wave4$overlap) - 0.05
-# wave_plot(wave4, alpha = 0.1, thres = thres)
-
-# 10000 iter above thres
-print(paste("Phase: above threshold. Fire: ", fire_name, sep = ""))
-wave5 <- explore_likelihood_iterate(
-  n_waves = 20, data = wave4, n = 500, accept_thres = thres,
-  var_factor = c(1.5, 2, 1),
-  support = sup, spread_data = spread_data,
-  centre = "global", sobol = TRUE, phase = "above_threshold",
-  write = F, fire_name = fire_name
-)
-
-
-like_sim <- wave5
-
-# wave_plot(like_sim[like_sim$overlap > 0.5, ], alpha = 0.1,
-#           thres = thres)
-
-
-# Fit gam -----------------------------------------------------------------
+thres <- max(like_sim$overlap) - delta_thres
 
 data_gam_bern <- as.data.frame(cbind(like_sim$par_values,
                                      y = as.numeric(like_sim$overlap >= thres)))
 
-k_side <- 15
+k_side <- 10
 k_int <- 6
 basis <- "cr"
 
-# formula_use <- gam_formula_bern_reduced
-# formula_use <- gam_formula_bern_extra
-formula_use <- gam_formula_bern_full
-
 gam_bern <- bam(
-  formula_use, data = data_gam_bern, family = "binomial",
+  gam_formula_bern, data = data_gam_bern, family = "binomial",
   method = "fREML", discrete = T, nthreads = 8
 )
 summary(gam_bern)
@@ -1007,21 +909,17 @@ fbern <- fitted(gam_bern)
 # print(paste("Sampling posterior. Fire: ", fire_name, sep = ""))
 sup_reduced <- reduce_support(like_sim$par_values[like_sim$overlap >= thres, ],
                               sup, 0.5)
-r_gam <- rejection_sample_parallel(300, gam_bern, sup_reduced, cores = 15)
+r_gam <- rejection_sample_parallel(500, gam_bern, sup_reduced, cores = 15)
 draws <- do.call("rbind", r_gam) %>% as.data.frame
 
-# par(mfrow = c(3, 3))
-# for(i in 1:ncol(draws)) {
-#   dd <- density(draws[, i], from = sup[1, i], to = sup[2, i])
-#   plot(dd, main = names(draws)[i],
-#        ylim = c(0, max(dd$y) * 1.05),
-#        xlim = sup[, i], ylab = NA, xlab = NA)
-# }
-# par(mfrow = c(1, 1))
-
-# ff <- like_sim$overlap >= thres
-# plot(like_sim$par_values[ff, "forest"] ~ like_sim$par_values[ff, "elev"])
-# plot(like_sim$par_values[ff, "wind"] ~ like_sim$par_values[ff, "elev"])
+par(mfrow = c(3, 3))
+for(i in 1:ncol(draws)) {
+  dd <- density(draws[, i], from = sup[1, i], to = sup[2, i])
+  plot(dd, main = names(draws)[i],
+       ylim = c(0, max(dd$y) * 1.05),
+       xlim = sup[, i], ylab = NA, xlab = NA)
+}
+par(mfrow = c(1, 1))
 
 # Check GAM ---------------------------------------------------------------
 
@@ -1030,11 +928,7 @@ ppmat <- as.matrix(draws[ids, ])
 
 overlap_check <- similarity_simulate_parallel(particles = ppmat,
                                               fire_data = spread_data)
-hist(overlap_check$overlap, xlim = c(0, 1), main = fire_name)
+hist(overlap_check$overlap, xlim = c(0, 1))
 abline(v = thres, col = 2, lwd = 2)
-abline(v = mean(overlap_check$overlap), col = 4, lwd = 2)
 sum(overlap_check$overlap >= thres) / nrow(overlap_check)
-
-sum(like_sim$overlap >= thres) / nrow(like_sim)
-
-
+# sólo el 2.8 % está arriba del overlap.

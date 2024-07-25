@@ -163,16 +163,16 @@ sdata <- list(
   priorscale_b = 10
 )
 
-mod <- sampling(
-  smodel, sdata, refresh = 100, seed = 32425,
-  # cores = 1, chains = 1, iter = 5,
-  cores = 6, chains = 6, iter = 3000, warmup = 1000, thin = 1,
-  control = list(adapt_delta = 0.9)
-)
-saveRDS(mod, file.path("..", "data", "NDVI_regional_data",
-                       "ndvi_effects_samples.rds"))
-# mod <- readRDS(file.path("..", "data", "NDVI_regional_data",
-#                          "ndvi_effects_samples.rds"))
+# mod <- sampling(
+#   smodel, sdata, refresh = 100, seed = 32425,
+#   # cores = 1, chains = 1, iter = 5,
+#   cores = 6, chains = 6, iter = 3000, warmup = 1000, thin = 1,
+#   control = list(adapt_delta = 0.9)
+# )
+# saveRDS(mod, file.path("..", "data", "NDVI_regional_data",
+#                        "ndvi_effects_samples.rds"))
+mod <- readRDS(file.path("..", "data", "NDVI_regional_data",
+                         "ndvi_effects_samples.rds"))
 
 smod <- summary(mod)[[1]]
 min(smod[, "n_eff"]) # 2788.108
@@ -307,31 +307,74 @@ pi_ndvi <- samples[, c("pi_ndvi_shrub", "pi_ndvi_grass")]
 optim_ndvi_mean <- colMeans(optim_ndvi)
 names(optim_ndvi_mean) <- veg_classes
 
-pi_ndvi_mean <- colMeans(pi_ndvi)
-names(pi_ndvi_mean) <- veg_classes[2:3]
+pi_ndvi_mean <- c(1, colMeans(pi_ndvi))
+names(pi_ndvi_mean) <- veg_classes
 
-oprep <- outer(rep(1, nrow(dfit)), optim_ndvi_mean)
-ndvi_diff_quad <- rowSums((oprep - c(dfit$ndvi_dt)) ^ 2 * veg)
-ndvi_dq_mean <- mean(ndvi_diff_quad)
-ndvi_dq_sd <- sd(ndvi_diff_quad)
+# export the mean and sd of the term that will be multiplied by beta in the
+# spread model, so the landscape layer is passed standardized to the simulator:
 
-hist(b_ndvi_for * ndvi_dq_sd) # andaría por -1 si usara el término estandarizado
+# ndvi_predictor = pi[v] * (ndvi - optim[v]) ^ 2
+ndvi_predictor <- numeric(nrow(dfit))
+for(i in 1:nrow(dfit)) {
+  ndvi_predictor[i] <- pi_ndvi_mean[veg_num[i]] *
+                       (dfit$ndvi_dt[i] - optim_ndvi_mean[veg_num[i]]) ^ 2
+}
+
+# compute whole mean and sd
+ndvi_pred_mean <- mean(ndvi_predictor)
+ndvi_pred_sd <- sd(ndvi_predictor)
+
+# and by veg type
+
+ndvi_pred_mean_veg <- numeric(V)
+ndvi_pred_sd_veg <- numeric(V)
+names(ndvi_pred_mean_veg) <- names(ndvi_pred_sd_veg) <- veg_classes
+for(v in 1:V) {
+  ndvi_vals <- ndvi_predictor[veg_num == v]
+  ndvi_pred_mean_veg[v] <- mean(ndvi_vals)
+  ndvi_pred_sd_veg[v] <- sd(ndvi_vals)
+}
+
+# aggregate by vegetation type
+dfit$ndvi_term <- ndvi_predictor
+dfit$slope_term <- sin(dfit$slope * pi / 180)
+
+pred_mean_veg <- aggregate(cbind(ndvi_term, northing, elevation, slope_term) ~
+                              vegfac3, data = dfit, FUN = mean)
+pred_sd_veg <- aggregate(cbind(ndvi_term, northing, elevation, slope_term) ~
+                          vegfac3, data = dfit, FUN = sd)
+
+
+
+hist(b_ndvi_for * ndvi_pred_sd_veg[1]) # andaría por -1 si usara el término estandarizado
 
 theta_hat <- list(
   optim_ndvi_mean = optim_ndvi_mean,
   pi_ndvi_mean = pi_ndvi_mean,
 
-  ndvi_diffquad_mean = ndvi_dq_mean,
-  ndvi_diffquad_sd = ndvi_dq_sd,
+  ndvi_term_mean = ndvi_pred_mean,
+  ndvi_term_sd = ndvi_pred_sd,
+
+  northing_mean = mean(dfit$northing),
+  northing_sd = sd(dfit$northing),
 
   elevation_mean = mean(dfit$elevation),
   elevation_sd = sd(dfit$elevation),
+
+  slope_term_mean = mean(sin(dfit$slope * pi / 180)),
+  slope_term_sd = sd(sin(dfit$slope * pi / 180)),
+
+  # the same but by vegetation type
+  pred_mean_veg = pred_mean_veg,
+  pred_sd_veg = pred_sd_veg,
 
   notes =
 "Posterior means of the estimates from a regional logistic regression,
 similar as the model from Barberá et al. 2024 (simplified).
 Mean NDVI from the previous summer was used, detrending and at 2022 scale.
 dq stands for squared difference.
+Means and sds of predictors/terms are exported to standardize landscape arrays,
+so spread parameters (betas) are in similar scales.
 See <NDVI effects at the regional scale.R> for details."
 )
 

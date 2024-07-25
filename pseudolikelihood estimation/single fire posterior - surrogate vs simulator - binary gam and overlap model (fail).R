@@ -61,12 +61,6 @@ registerDoMC(n_cores)
 data_dir <- file.path("data", "focal fires data", "landscapes")
 filenames <- list.files(data_dir)
 
-# load file with constants to standardize
-ndvi_params <- readRDS(file.path("data", "NDVI_regional_data",
-                                 "ndvi_optim_and_proportion.rds"))
-
-slope_sd <- ndvi_params$slope_term_sd
-
 # dir to save output
 target_dir <- file.path("files", "pseudolikelihood_estimation")
 
@@ -77,55 +71,13 @@ par_names <- c("forest", "shrubland", "grassland",
                "ndvi", "north", "elev", "slope", "wind",
                "steps")
 
+# number of particles to choose by wave
+n_pw <- 1000
+
 # number of fires to simulate by particle
 n_rep <- 20
 
-ext_alpha <- 50
-ext_beta <- 30
-
-params_lower <- c("forest" = -ext_alpha,
-                  "shrubland" = -ext_alpha,
-                  "grassland" = -ext_alpha,
-                  "ndvi" = -ext_beta,
-                  "north" = 0,
-                  "elev" = -ext_beta,
-                  "slope" = 0,
-                  "wind" = 0,
-                  "steps" = 5)
-
-params_upper <- c("forest" = ext_alpha,
-                  "shrubland" = ext_alpha,
-                  "grassland" = ext_alpha,
-                  "ndvi" = 0,
-                  "north" = ext_beta,
-                  "elev" = 0,
-                  "slope" = ext_beta / slope_sd, # because it is not standardized
-                  "wind" = ext_beta,
-                  "steps" = NA)       # to be filled later, varies by fire
-
-
-## PROBAMOS ELIMINANDO DIMENSIONES
-params_lower <- c("forest" = -ext_alpha,
-                  "shrubland" = -ext_alpha,
-                  "grassland" = -ext_alpha,
-                  "ndvi" = -1e-5,
-                  "north" = -1e-5,
-                  "elev" = -ext_beta,#-1e-5,
-                  "slope" = 0,
-                  "wind" = 0,
-                  "steps" = 5)
-
-params_upper <- c("forest" = ext_alpha,
-                  "shrubland" = ext_alpha,
-                  "grassland" = ext_alpha,
-                  "ndvi" = 1e-5,
-                  "north" = 1e-5,
-                  "elev" = 0, #1e-5,
-                  "slope" = ext_beta / slope_sd, # because it is not standardized
-                  "wind" = ext_beta,
-                  "steps" = NA)       # to be filled later, varies by fire
-
-gam_formula_bern_full <- formula(
+gam_formula_bern <- formula(
   y ~
     # marginal effects
     s(forest, bs = basis, k = k_side) +
@@ -157,95 +109,48 @@ gam_formula_bern_full <- formula(
     ti(grassland, slope, k = k_int, bs = basis) +
     ti(grassland, wind, k = k_int, bs = basis) +
 
-    # other interactions
     ti(elev, slope, k = k_int, bs = basis) +
     ti(elev, wind, k = k_int, bs = basis) +
-    ti(elev, ndvi, k = k_int, bs = basis) +
-    ti(slope, wind, k = k_int, bs = basis) +
-    ti(north, ndvi, k = k_int, bs = basis)
+    ti(slope, wind, k = k_int, bs = basis)
 )
 
-# sin las dimensiones quitadas
-gam_formula_bern_reduced <- formula(
-  y ~
+gam_formula_binom <- formula(
+  cbind(count_above, n_rep - count_above) ~
     # marginal effects
     s(forest, bs = basis, k = k_side) +
     s(shrubland, bs = basis, k = k_side) +
     s(grassland, bs = basis, k = k_side) +
-    # s(ndvi, bs = basis, k = k_side) +
-    # s(north, bs = basis, k = k_side) +
-    # s(elev, bs = basis, k = k_side) +
-    s(slope, bs = basis, k = k_side) +
-    s(wind, bs = basis, k = k_side) +
-    s(steps, bs = basis, k = k_side) +
-
-    # interactions (intercepts)
-    # ti(forest, ndvi, k = k_int, bs = basis) +
-    # ti(forest, north, k = k_int, bs = basis) +
-    # ti(forest, elev, k = k_int, bs = basis) +
-    ti(forest, slope, k = k_int, bs = basis) +
-    ti(forest, wind, k = k_int, bs = basis) +
-
-    # ti(shrubland, ndvi, k = k_int, bs = basis) +
-    # ti(shrubland, north, k = k_int, bs = basis) +
-    # ti(shrubland, elev, k = k_int, bs = basis) +
-    ti(shrubland, slope, k = k_int, bs = basis) +
-    ti(shrubland, wind, k = k_int, bs = basis) +
-
-    # ti(grassland, ndvi, k = k_int, bs = basis) +
-    # ti(grassland, north, k = k_int, bs = basis) +
-    # ti(grassland, elev, k = k_int, bs = basis) +
-    ti(grassland, slope, k = k_int, bs = basis) +
-    ti(grassland, wind, k = k_int, bs = basis) +
-
-    # other interactions
-    # ti(elev, slope, k = k_int, bs = basis) +
-    # ti(elev, wind, k = k_int, bs = basis) +
-    # ti(elev, ndvi, k = k_int, bs = basis) +
-    ti(slope, wind, k = k_int, bs = basis) #+
-  # ti(north, ndvi, k = k_int, bs = basis)
-)
-
-# incluyendo alguna dimensión que no haga nada: elev con sus interaccs
-gam_formula_bern_extra <- formula(
-  y ~
-    # marginal effects
-    s(forest, bs = basis, k = k_side) +
-    s(shrubland, bs = basis, k = k_side) +
-    s(grassland, bs = basis, k = k_side) +
-    # s(ndvi, bs = basis, k = k_side) +
-    # s(north, bs = basis, k = k_side) +
+    s(ndvi, bs = basis, k = k_side) +
+    s(north, bs = basis, k = k_side) +
     s(elev, bs = basis, k = k_side) +
     s(slope, bs = basis, k = k_side) +
     s(wind, bs = basis, k = k_side) +
     s(steps, bs = basis, k = k_side) +
 
     # interactions (intercepts)
-    # ti(forest, ndvi, k = k_int, bs = basis) +
-    # ti(forest, north, k = k_int, bs = basis) +
-    # ti(forest, elev, k = k_int, bs = basis) +
+    ti(forest, ndvi, k = k_int, bs = basis) +
+    ti(forest, north, k = k_int, bs = basis) +
+    ti(forest, elev, k = k_int, bs = basis) +
     ti(forest, slope, k = k_int, bs = basis) +
     ti(forest, wind, k = k_int, bs = basis) +
 
-    # ti(shrubland, ndvi, k = k_int, bs = basis) +
-    # ti(shrubland, north, k = k_int, bs = basis) +
-    # ti(shrubland, elev, k = k_int, bs = basis) +
+    ti(shrubland, ndvi, k = k_int, bs = basis) +
+    ti(shrubland, north, k = k_int, bs = basis) +
+    ti(shrubland, elev, k = k_int, bs = basis) +
     ti(shrubland, slope, k = k_int, bs = basis) +
     ti(shrubland, wind, k = k_int, bs = basis) +
 
-    # ti(grassland, ndvi, k = k_int, bs = basis) +
-    # ti(grassland, north, k = k_int, bs = basis) +
-    # ti(grassland, elev, k = k_int, bs = basis) +
+    ti(grassland, ndvi, k = k_int, bs = basis) +
+    ti(grassland, north, k = k_int, bs = basis) +
+    ti(grassland, elev, k = k_int, bs = basis) +
     ti(grassland, slope, k = k_int, bs = basis) +
     ti(grassland, wind, k = k_int, bs = basis) +
 
-    # other interactions
     ti(elev, slope, k = k_int, bs = basis) +
     ti(elev, wind, k = k_int, bs = basis) +
-    # ti(elev, ndvi, k = k_int, bs = basis) +
-    ti(slope, wind, k = k_int, bs = basis) #+
-  # ti(north, ndvi, k = k_int, bs = basis)
+    ti(slope, wind, k = k_int, bs = basis)
 )
+
 # Functions ---------------------------------------------------------------
 
 normalize <- function(x) x / sum(x)
@@ -586,10 +491,10 @@ explore_likelihood <- function(data, n = 600, var_factor = 1, n_best = "all",
                                phase = NULL) {
 
   ### Testo
-  # data = wave1; n = 500; p_best = 0.15; prob_fn = NULL;
+  # data = sim1; n = 500; p_best = 0.15; prob_fn = NULL;
   # support = sup; spread_data = spread_data;
   # centre = "global"; sobol = TRUE;
-  # pow = 1; var_factor = 1; accept_thres = NULL
+  # pow = 1; var_factor = 1
   ### endo testo
 
   # if threshold is used, ignore p_best
@@ -902,7 +807,529 @@ reduce_support <- function(x, support, prop = 0.75) {
 
 # Simulation waves ---------------------------------------------------------
 
-fire_file <- "2000_34.rds"#"2000_8.rds"#"2015_53.rds"#"2008_3.rds" #"1999_25j.rds"#"2008_3.rds" #
+ext_alpha <- 30
+ext_beta <- 30
+ext_ndvi <- 200
+
+
+# for(f in 1:length(filenames)) {
+
+  fire_file <- "2000_8.rds"#"2008_3.rds" #filenames[f] # #"1999_25j.rds"#"2015_53.rds"#
+  fire_name <- strsplit(fire_file, ".rds")[[1]]
+  print(paste("Fire:", fire_name))
+  full_data <- readRDS(file.path(data_dir, fire_file))
+  # subset data needed for spread (to be cloned across workers)
+  spread_data <- full_data[c("landscape", "ig_rowcol",
+                             "burned_layer", "burned_ids")]
+
+  bb <- get_bounds(fire_data = spread_data)
+
+  params_lower <- c("forest" = -ext_alpha,
+                    "shrubland" = -ext_alpha,
+                    "grassland" = -ext_alpha,
+                    "ndvi" = -ext_ndvi,
+                    "north" = -ext_beta,
+                    "elev" = -ext_beta,
+                    "slope" = -ext_beta * 2,
+                    "wind" = -ext_beta,
+                    "steps" = 5)
+
+  params_upper <- c("forest" = ext_alpha,
+                    "shrubland" = ext_alpha,
+                    "grassland" = ext_alpha,
+                    "ndvi" = 0,
+                    "north" = ext_beta * 2,
+                    "elev" = ext_beta,
+                    "slope" = ext_beta * 2,
+                    "wind" = ext_beta,
+                    "steps" = bb["largest", "steps_used"])
+
+  sup <- rbind(params_lower, params_upper)
+
+
+  # Explore likelihood
+  # Phase 1: sobol
+  registerDoMC(15)
+
+  ss <- sobol(n = 10000, dim = n_coef)
+  particles <- scale_params(ss, sup)
+  waves_1 <- rep(1:20, each = 500)
+  # loop to save
+  wave1 <- NULL
+  print(paste("Phase: sobol. Fire: ", fire_name, sep = ""))
+  for(w in 1:20) {
+    # w = 1
+    wlocal <- similarity_simulate_parallel(particles[waves_1 == w, ],
+                                           spread_data)
+    wlocal$wave <- w
+    wlocal$phase <- "sobol"
+    colnames(wlocal$par_values) <- par_names
+
+    # nn <- paste(fire_name, "-wave-", w, ".rds", sep = "")
+    # saveRDS(wlocal, file.path(target_dir, nn))
+
+    wave1 <- rbind(wave1, wlocal)
+    rr <- round(max(wave1$overlap), 4)
+    print(paste("wave ", w, ", overlap max: ", rr, sep = ""))
+  }
+
+  # wave 2: reproduce 15 % best (500 * 20)
+
+  print(paste("Phase: search higher. Fire: ", fire_name, sep = ""))
+  wave2 <- explore_likelihood_iterate(
+    n_waves = 20, data = wave1, n = 500, p_best = 0.15,
+    var_factor = c(1.5, 2, 1),
+    support = sup, spread_data = spread_data,
+    centre = "global", sobol = TRUE, phase = "search_higher",
+    write = F, fire_name = fire_name
+  )
+  # wave_plot(wave2)
+
+  # 5000 iter reproducing the 100 best, only to reach the max
+  print(paste("Phase: search maximum. Fire: ", fire_name, sep = ""))
+  wave3 <- explore_likelihood_iterate(
+    n_waves = 10, data = wave2, n = 500, n_best = 100,
+    var_factor = c(1.5, 2, 1),
+    support = sup, spread_data = spread_data,
+    centre = "global", sobol = TRUE, phase = "search_maximum",
+    write = F, fire_name = fire_name
+  )
+  # wave_plot(wave3)
+
+  # OLD PROCEDURE:
+
+  # # define threshold
+  # n_accept <- 100
+  # pcum_thres <- 1 - n_accept / nrow(wave2)
+  # thres <- quantile(wave2$overlap, pcum_thres) %>% unname
+  #
+  # # wave 3: 5000 above threshold
+  # print(paste("Phase: above threshold. Fire: ", fire_name, sep = ""))
+  # wave3 <- explore_likelihood_iterate(
+  #   n_waves = 10, data = wave2, n = 500, accept_thres = thres,
+  #   var_factor = c(1.5, 2, 1),
+  #   support = sup, spread_data = spread_data,
+  #   centre = "global", sobol = TRUE, phase = "above_threshold",
+  #   write = F, fire_name = fire_name,
+  # )
+
+  # SD within particle of the good particles
+  good_thres <- max(wave3$overlap) - 0.1
+  sds <- apply(wave3$ov_values[wave3$overlap >= good_thres, ],
+               1, sd)
+  rdif <- apply(wave3$ov_values[wave3$overlap >= good_thres, ],
+                1, function(x) diff(range(x)))
+  # mean(sds)
+  # hist(sds)
+  # hist(rdif)
+  # mean(rdif)
+  # hist(wave3$ov_values[wave3$overlap >= good_thres, ])
+
+  nrow(wave3[wave3$overlap >= max(wave3$overlap) - mean(sds), ])
+
+  # wave_plot(wave3[wave3$overlap > 0.3, ], thres = max(wave3$overlap) - mean(sds))
+  # wave_plot(wave3[wave3$overlap > 0.3, ], thres = max(wave3$overlap) - 0.05)
+
+  # absolute thres as
+  thres <- max(wave3$overlap) - 0.05
+  # wave 4: 15000 above new threshold
+  print(paste("Phase: above threshold. Fire: ", fire_name, sep = ""))
+  wave4 <- explore_likelihood_iterate(
+    n_waves = 30, data = wave3, n = 500, accept_thres = thres,
+    var_factor = c(1.5, 2, 1),
+    support = sup, spread_data = spread_data,
+    centre = "global", sobol = TRUE, phase = "above_threshold",
+    write = F, fire_name = fire_name,
+  )
+
+  wave_plot(wave4,
+            alpha = 0.3, thres = thres)
+
+  hist(wave4$ov_values[wave4$overlap >= thres, ])
+  abline(v = c(thres, max(wave4$overlap)), col = 2)
+
+  nrow(wave4[wave4$overlap >= thres, ]) / nrow(wave4)
+  wave4$prop <- apply(wave4$ov_values, 1, function(x) sum(x > thres) / n_rep)
+
+  # wave_plot(wave4, response = "prop",
+  #           alpha = 0.3, thres = thres)
+
+  like_sim <- wave4
+
+
+# Fit gam -----------------------------------------------------------------
+
+
+  data_gam_bern <- as.data.frame(cbind(like_sim$par_values,
+                                       y = as.numeric(like_sim$overlap >= thres)))
+  data_gam_bern$count_above <- apply(like_sim$ov_values, 1,
+                                     function(x) sum(x > thres))
+
+  k_side <- 10
+  k_int <- 6
+  basis <- "cr"
+
+  gam_bern <- bam(
+    gam_formula_bern, data = data_gam_bern, family = "binomial",
+    method = "fREML", discrete = T, nthreads = 8
+  )
+  summary(gam_bern)
+
+
+
+  fbern <- fitted(gam_bern)
+  fbinom <- fitted(gam_binom)
+
+  plot(fbern ~ fbinom, col = rgb(0,0,0,0.2), pch = 19)
+
+  # Sample GAM-approximated posterior
+
+  # print(paste("Sampling posterior. Fire: ", fire_name, sep = ""))
+  apply(like_sim$par_values[like_sim$overlap >= thres, ], 2, range)
+  sup_reduced <- reduce_support(like_sim$par_values[like_sim$overlap >= thres, ],
+                                sup, 0.5)
+  r_gam <- rejection_sample_parallel(1000, gam_bern, sup_reduced, cores = 15)
+  draws <- do.call("rbind", r_gam) %>% as.data.frame
+
+  # nn <- paste(fire_name, "posterior_samples.rds", sep = "-")
+  # saveRDS(r_gam, file.path(target_dir, nn))
+
+  # Plot posterior
+  dflong <- pivot_longer(draws, all_of(1:n_coef), values_to = "par_value",
+                         names_to = "par_names")
+  dflong$par_names <- factor(dflong$par_names, levels = par_names)
+
+  marginals_plot <-
+    ggplot(dflong, aes(x = par_value)) +
+    geom_density(alpha = 0, adjust = 1.5) +
+    facet_wrap(vars(par_names), scales = "free", strip.position = "bottom") +
+    theme(panel.grid.minor = element_blank(),
+          strip.background = element_rect(color = "white", fill = "white"),
+          strip.placement = "outside",
+          axis.title.x = element_blank(),
+          strip.text.x = element_text(vjust = 3)) +
+    ggtitle(fire_name)
+  marginals_plot
+  # ggsave(file.path(target_dir, paste(fire_name, "-plot_marginals.png", sep = "")),
+  #        plot = marginals_plot, height = 12, width = 15, units = "cm")
+
+
+
+  # posteriores de a pares
+
+  combs <- as.data.frame(combn(par_names, 2) %>% t)
+  names(combs) <- c("x", "y")
+  ncomb <- nrow(combs)
+  plist <- vector("list", ncomb)
+
+  for(i in 1:ncomb) {
+    # i = 1
+    take <- combs[i, ] %>% as.character()
+    dlocal <- draws[, take]
+
+    p <-
+      ggplot(dlocal, aes_string(x = take[1], y = take[2])) +
+      geom_hdr(probs = seq(0.05, 0.95, by = 0.1),
+               method = method_kde(adjust = 1.5)) +
+      theme(panel.grid.minor = element_blank(),
+            legend.position = "none")
+
+    # if(i == 9) {
+    #   p <- p + theme(legend.position = "right")
+    # }
+
+    if(i == 1) {
+      p <- p + ggtitle(fire_name)
+    }
+
+    plist[[i]] <- p
+  }
+
+  x11()
+  pairs_plot <- egg::ggarrange(plots = plist, ncol = 6, draw = FALSE,
+                               newpage = FALSE)
+  ggsave(file.path(target_dir, paste(fire_name, "-plot_pairs.png", sep = "")),
+         plot = pairs_plot, height = 26, width = 25, units = "cm")
+  dev.off()
+
+  # # clean
+  # remove(spread_data, gam_bern, r_gam, like_sim, wave3)
+  # gc()
+# }
+
+# MCMC simulating fire ----------------------------------------------------
+
+# initial values (fixed, so all chains start equal)
+nc <- 50
+best_100 <- order(like_sim$overlap, decreasing = TRUE)[1:200]
+set.seed(23432)
+best_ids <- sample(best_100, nc, replace = F)
+best_parts <- logit_scaled(like_sim$par_values[best_ids, ],
+                           sup)
+init_list <- lapply(1:nc, function(i) best_parts[i, ])
+sigma_init <- cov(logit_scaled(like_sim$par_values[like_sim$overlap >= thres, ],
+                               support = sup))
+sampling_iters <- 4000
+adapt_iters <- 2000
+
+r_sim <- MCMC_parallel(fun = fn_like_sim_bin,
+                       n = sampling_iters + adapt_iters,
+                       adapt = adapt_iters,
+                       n_chains = nc,
+                       n_cores = 15,
+                       scale = sigma_init, init_list = init_list,
+                       support = sup, fire_data = spread_data, thres = thres)
+gc()
+posterior_file <- paste(
+  "files/pseudolikelihood_estimation/posterior-simulation-",
+  fire_file, sep = ""
+)
+saveRDS(r_sim, posterior_file)
+r_sim <- readRDS(posterior_file)
+
+# Comparo posteriores -----------------------------------------------------
+
+# postprocessing
+post_names <- c("simulation", "gam") # "gam_bin"
+arr_all <- list(tidy_samples(r_sim, adapt_iters, sup),
+                tidy_samples_ind(r_gam))
+names(arr_all) <- post_names
+
+# Compare with densities
+dflong <- do.call("rbind", lapply(arr_all, function(a) {
+  # tt <- thin_draws(a, 10)
+  return(as_draws_df(a, .nchains = nc))
+}))
+names(dflong) <- par_names
+dflong$sampling <- factor(
+  rep(post_names, each = nrow(dflong) / length(post_names)),
+  levels = post_names
+)
+
+dflong <- dflong[, c(par_names, "sampling")]
+dflonger <- pivot_longer(dflong, all_of(1:n_coef), values_to = "par_value",
+                         names_to = "par_names")
+dflonger$par_names <- factor(dflonger$par_names, levels = par_names)
+
+ggplot(dflonger, aes(x = par_value, fill = sampling, color = sampling)) +
+  geom_density(alpha = 0, adjust = 1.5) +
+  facet_wrap(vars(par_names), scales = "free") +
+  theme(panel.grid.minor = element_blank()) +
+  viridis::scale_color_viridis(discrete = TRUE, end = 0.7, option = "D")
+
+# Miramos por cadena el MCMC
+mcmc_dens_overlay(arr_all[["simulation"]]) +
+  scale_color_viridis(discrete = TRUE, option = "A", end = 0.8) +
+  theme(panel.grid.minor = element_blank()) +
+  ggtitle("simulation")
+
+# posteriores de a pares
+
+combs <- as.data.frame(combn(par_names, 2) %>% t)
+names(combs) <- c("x", "y")
+ncomb <- nrow(combs)
+plist <- vector("list", ncomb)
+dflong2 <- dflong
+dflong2$sampling <- factor(dflong$sampling, levels = levels(dflong$sampling),
+                           labels = c("simulation", "gam"))
+
+for(i in 1:ncomb) {
+  # i = 1
+  take <- combs[i, ] %>% as.character()
+  dlocal <- dflong2[, c(take, "sampling")]
+
+  p <-
+  ggplot(dlocal, aes_string(x = take[1], y = take[2])) +
+    geom_hdr(probs = seq(0.05, 0.95, by = 0.1),
+             method = method_kde(adjust = 2)) +
+    facet_wrap(vars(sampling), nrow = 1) +
+    theme(panel.grid.minor = element_blank(),
+          legend.position = "none",
+          strip.background = element_rect(fill = "white", color = "white"),
+          strip.text = element_text(size = 10))
+
+
+  if(!(i %in% 1:6)) {
+    p <- p +
+      theme(strip.background = element_blank(),
+            strip.text = element_blank())
+  }
+
+  # if(i == 9) {
+  #   p <- p + theme(legend.position = "right")
+  # }
+
+  plist[[i]] <- p
+}
+
+x11()
+pairs_compare <- egg::ggarrange(plots = plist, ncol = 6,
+                                draw = FALSE, newpage = FALSE)
+ggsave(file.path(target_dir, paste(fire_name, "-plot_pairs_mcmc-gam.png", sep = "")),
+       plot = pairs_compare, height = 26, width = 34, units = "cm")
+dev.off()
+
+
+
+# Sample proportion-posterior with GAM and MCMC ---------------------------
+
+# Sample GAM-approximated posterior
+gam_binom <- bam(
+  gam_formula_binom, data = data_gam_bern, family = "binomial",
+  method = "fREML", discrete = T, nthreads = 8
+) # tardan similar
+summary(gam_binom)
+length(coef(gam_binom))
+
+
+sup_reduced <- reduce_support(like_sim$par_values[like_sim$overlap >= thres, ],
+                              sup, 0.5)
+r_gam_binom <- rejection_sample_parallel(1000, gam_binom, sup_reduced,
+                                         cores = 15)
+draws <- do.call("rbind", r_gam_binom) %>% as.data.frame
+
+# nn <- paste(fire_name, "posterior_samples.rds", sep = "-")
+# saveRDS(r_gam, file.path(target_dir, nn))
+
+# Plot posterior
+dflong <- pivot_longer(draws, all_of(1:n_coef), values_to = "par_value",
+                       names_to = "par_names")
+dflong$par_names <- factor(dflong$par_names, levels = par_names)
+
+
+# MCMC
+nc <- 50
+best_100 <- order(like_sim$overlap, decreasing = TRUE)[1:200]
+set.seed(23432)
+best_ids <- sample(best_100, nc, replace = F)
+best_parts <- logit_scaled(like_sim$par_values[best_ids, ],
+                           sup)
+init_list <- lapply(1:nc, function(i) best_parts[i, ])
+sigma_init <- cov(logit_scaled(like_sim$par_values[like_sim$overlap >= thres, ],
+                               support = sup))
+sampling_iters <- 4000
+adapt_iters <- 2000
+
+r_sim_binom <- MCMC_parallel(fun = fn_like_sim_binom, # _binom instead of bin
+                             n = sampling_iters + adapt_iters,
+                             adapt = adapt_iters,
+                             n_chains = nc,
+                             n_cores = 15,
+                             scale = sigma_init, init_list = init_list,
+                             support = sup, fire_data = spread_data,
+                             thres = thres)
+gc()
+posterior_file <- paste(
+  "files/pseudolikelihood_estimation/posterior-simulation-binom",
+  fire_file, sep = ""
+)
+saveRDS(r_sim, posterior_file)
+r_sim <- readRDS(posterior_file)
+
+
+# postprocessing
+post_names <- c("simulation", "gam") # "gam_bin"
+arr_all <- list(tidy_samples(r_sim_binom, adapt_iters, sup),
+                tidy_samples_ind(r_gam_binom))
+names(arr_all) <- post_names
+
+# Compare with densities
+dflong <- do.call("rbind", lapply(arr_all, function(a) {
+  # tt <- thin_draws(a, 10)
+  return(as_draws_df(a, .nchains = nc))
+}))
+names(dflong) <- par_names
+dflong$sampling <- factor(
+  rep(post_names, each = nrow(dflong) / length(post_names)),
+  levels = post_names
+)
+
+dflong <- dflong[, c(par_names, "sampling")]
+dflonger <- pivot_longer(dflong, all_of(1:n_coef), values_to = "par_value",
+                         names_to = "par_names")
+dflonger$par_names <- factor(dflonger$par_names, levels = par_names)
+
+
+# marginal densities
+ggplot(dflonger, aes(x = par_value, fill = sampling, color = sampling)) +
+  geom_density(alpha = 0, adjust = 1.5) +
+  facet_wrap(vars(par_names), scales = "free") +
+  theme(panel.grid.minor = element_blank()) +
+  viridis::scale_color_viridis(discrete = TRUE, end = 0.7, option = "D")
+
+
+# posteriores de a pares
+
+combs <- as.data.frame(combn(par_names, 2) %>% t)
+names(combs) <- c("x", "y")
+ncomb <- nrow(combs)
+plist <- vector("list", ncomb)
+dflong2 <- dflong
+dflong2$sampling <- factor(dflong$sampling, levels = levels(dflong$sampling),
+                           labels = c("simulation", "gam"))
+
+for(i in 1:ncomb) {
+  # i = 1
+  take <- combs[i, ] %>% as.character()
+  dlocal <- dflong2[, c(take, "sampling")]
+
+  p <-
+    ggplot(dlocal, aes_string(x = take[1], y = take[2])) +
+    geom_hdr(probs = seq(0.05, 0.95, by = 0.1),
+             method = method_kde(adjust = 2)) +
+    facet_wrap(vars(sampling), nrow = 1) +
+    theme(panel.grid.minor = element_blank(),
+          legend.position = "none",
+          strip.background = element_rect(fill = "white", color = "white"),
+          strip.text = element_text(size = 10))
+
+
+  if(!(i %in% 1:6)) {
+    p <- p +
+      theme(strip.background = element_blank(),
+            strip.text = element_blank())
+  }
+
+  # if(i == 9) {
+  #   p <- p + theme(legend.position = "right")
+  # }
+
+  plist[[i]] <- p
+}
+
+x11()
+pairs_compare <- egg::ggarrange(plots = plist, ncol = 6,
+                                draw = FALSE, newpage = FALSE)
+ggsave(file.path(target_dir, paste(fire_name, "-plot_pairs_mcmc-gam_binom.png", sep = "")),
+       plot = pairs_compare, height = 26, width = 34, units = "cm")
+dev.off()
+
+
+
+
+# Simulation waves again --------------------------------------------------
+
+
+# Otra idea: --------------------------------------------------------------
+
+
+# Volver a intentar ajustar el modelo al overlap. Luego, la métrica target puede
+# ser simplemente el producto de los overlaps individuales.
+# Quizás una normal al overlap le va bien, reemplazando por cero los negativos
+# y eliminando todo lo que tenga un IC muy incierto.
+# Para esto no habría que definir un umbral, solo asegurarse de llegar a un pico.
+
+# Aparte de las olas sobol y reproduciendo el 15 % mejor, luego hacer olas para
+# explorar lo máximos, reproduciendo las mejores N partículas.
+
+ext_alpha <- 30
+ext_beta <- 30
+ext_ndvi <- 200
+
+
+# for(f in 1:length(filenames)) {
+
+fire_file <- "2000_8.rds"#"2008_3.rds" #filenames[f] # #"1999_25j.rds"#"2015_53.rds"#
 fire_name <- strsplit(fire_file, ".rds")[[1]]
 print(paste("Fire:", fire_name))
 full_data <- readRDS(file.path(data_dir, fire_file))
@@ -911,8 +1338,43 @@ spread_data <- full_data[c("landscape", "ig_rowcol",
                            "burned_layer", "burned_ids")]
 
 bb <- get_bounds(fire_data = spread_data)
+
+params_lower <- c("forest" = -ext_alpha,
+                  "shrubland" = -ext_alpha,
+                  "grassland" = -ext_alpha,
+                  "ndvi" = -ext_ndvi,
+                  "north" = -ext_beta * 1,# va 2
+                  "elev" = -ext_beta,
+                  "slope" = -ext_beta * 2,
+                  "wind" = -ext_beta,
+                  "steps" = 5)
+
+params_upper <- c("forest" = ext_alpha,
+                  "shrubland" = ext_alpha,
+                  "grassland" = ext_alpha,
+                  "ndvi" = 0,
+                  "north" = ext_beta * 2,
+                  "elev" = ext_beta,
+                  "slope" = ext_beta * 2,
+                  "wind" = ext_beta,
+                  "steps" = bb["largest", "steps_used"])
+
+# sup_original <- rbind(params_lower, params_upper)
+# extra_diff <- apply(sup_original[, -n_coef], 2, diff) * 0.1
+#
+# sup <- rbind(sup_original[1, ] - c(extra_diff, 0),
+#              sup_original[2, ] + c(extra_diff, 0))
+
 sup <- rbind(params_lower, params_upper)
-sup[2, "steps"] <- bb["largest", "steps_used"]
+
+# Extended so GAM fits bad only where we dont care??? no extender el steps
+
+# PROBAR ESTA IDEAAAAA ----------------------------------------------------
+# USAR UN DOMINIO EXTENDIDO SO EL GAM COMETE ERROR SÓLO DONDE NO NOS IMPORTA.
+
+# EL GAM TIENE PROBLEMA CON LOS CEROS.
+
+
 
 # Explore likelihood
 # Phase 1: sobol
@@ -940,7 +1402,8 @@ for(w in 1:20) {
   print(paste("wave ", w, ", overlap max: ", rr, sep = ""))
 }
 
-# wave 2: reproduce 15 % best (500 * 20 = 10000)
+# wave 2: reproduce 15 % best (500 * 20)
+
 print(paste("Phase: search higher. Fire: ", fire_name, sep = ""))
 wave2 <- explore_likelihood_iterate(
   n_waves = 20, data = wave1, n = 500, p_best = 0.15,
@@ -951,90 +1414,144 @@ wave2 <- explore_likelihood_iterate(
 )
 # wave_plot(wave2)
 
-# 10000 iter reproducing the 100 best, to reach the max
+# 10000 iter reproducing the 200 best, only to reach the max
 print(paste("Phase: search maximum. Fire: ", fire_name, sep = ""))
-wave4 <- explore_likelihood_iterate(
-  n_waves = 100, data = wave2, n = 100, n_best = 100,
+wave3 <- explore_likelihood_iterate(
+  n_waves = 10, data = wave2, n = 500, n_best = 500,
   var_factor = c(1.5, 2, 1),
   support = sup, spread_data = spread_data,
   centre = "global", sobol = TRUE, phase = "search_maximum",
   write = F, fire_name = fire_name
 )
 
-thres <- max(wave4$overlap) - 0.05
-# wave_plot(wave4, alpha = 0.1, thres = thres)
-
-# 10000 iter above thres
-print(paste("Phase: above threshold. Fire: ", fire_name, sep = ""))
-wave5 <- explore_likelihood_iterate(
-  n_waves = 20, data = wave4, n = 500, accept_thres = thres,
+# 20000 iter reproducing the 200 best, only to reach the max
+print(paste("Phase: search maximum. Fire: ", fire_name, sep = ""))
+wave4 <- explore_likelihood_iterate(
+  n_waves = 30, data = wave3, n = 500, n_best = 100,
   var_factor = c(1.5, 2, 1),
   support = sup, spread_data = spread_data,
-  centre = "global", sobol = TRUE, phase = "above_threshold",
+  centre = "global", sobol = TRUE, phase = "search_maximum",
   write = F, fire_name = fire_name
 )
 
+like_sim <- wave4
+thres <- max(like_sim$overlap) - 0.05
+wave_plot(like_sim[like_sim$overlap > 0.5, ], alpha = 0.05,
+          thres = thres)
 
-like_sim <- wave5
+nrow(like_sim)
 
-# wave_plot(like_sim[like_sim$overlap > 0.5, ], alpha = 0.1,
-#           thres = thres)
-
-
-# Fit gam -----------------------------------------------------------------
-
-data_gam_bern <- as.data.frame(cbind(like_sim$par_values,
-                                     y = as.numeric(like_sim$overlap >= thres)))
+# GAM normal to the overlap -----------------------------------------------
 
 k_side <- 15
 k_int <- 6
 basis <- "cr"
 
-# formula_use <- gam_formula_bern_reduced
-# formula_use <- gam_formula_bern_extra
-formula_use <- gam_formula_bern_full
+data_gam_norm <- as.data.frame(cbind(like_sim$par_values,
+                                     y = like_sim$overlap))
 
-gam_bern <- bam(
-  formula_use, data = data_gam_bern, family = "binomial",
+gam_norm <- bam(
+  gam_formula_bern, data = data_gam_norm,
   method = "fREML", discrete = T, nthreads = 8
 )
-summary(gam_bern)
+summary(gam_norm) # 93 % explained
 
-fbern <- fitted(gam_bern)
+fnorm <- fitted(gam_norm)
+plot(fnorm ~ overlap, data = like_sim, col = rgb(0,0,0,0.2), pch = 19)
+abline(0, 1, col = "red")
 
-# Sample GAM-approximated posterior
+gpred <- predict(gam_norm, se.fit = T)
+icw <- (fnorm + qnorm(0.975) * gpred$se.fit) -
+       (fnorm - qnorm(0.975) * gpred$se.fit)
+hist(icw)
 
-# print(paste("Sampling posterior. Fire: ", fire_name, sep = ""))
-sup_reduced <- reduce_support(like_sim$par_values[like_sim$overlap >= thres, ],
-                              sup, 0.5)
-r_gam <- rejection_sample_parallel(300, gam_bern, sup_reduced, cores = 15)
-draws <- do.call("rbind", r_gam) %>% as.data.frame
+error_fit <- fnorm - like_sim$overlap
 
-# par(mfrow = c(3, 3))
-# for(i in 1:ncol(draws)) {
-#   dd <- density(draws[, i], from = sup[1, i], to = sup[2, i])
-#   plot(dd, main = names(draws)[i],
-#        ylim = c(0, max(dd$y) * 1.05),
-#        xlim = sup[, i], ylab = NA, xlab = NA)
-# }
-# par(mfrow = c(1, 1))
-
-# ff <- like_sim$overlap >= thres
-# plot(like_sim$par_values[ff, "forest"] ~ like_sim$par_values[ff, "elev"])
-# plot(like_sim$par_values[ff, "wind"] ~ like_sim$par_values[ff, "elev"])
-
-# Check GAM ---------------------------------------------------------------
-
-ids <- sample(1:nrow(draws), size = 2000, replace = F)
-ppmat <- as.matrix(draws[ids, ])
-
-overlap_check <- similarity_simulate_parallel(particles = ppmat,
-                                              fire_data = spread_data)
-hist(overlap_check$overlap, xlim = c(0, 1), main = fire_name)
-abline(v = thres, col = 2, lwd = 2)
-abline(v = mean(overlap_check$overlap), col = 4, lwd = 2)
-sum(overlap_check$overlap >= thres) / nrow(overlap_check)
-
-sum(like_sim$overlap >= thres) / nrow(like_sim)
+plot(error_fit ~ icw, col = rgb(0,0,0,0.05), pch = 19)
+plot(error_fit ~ like_sim$overlap, col = rgb(0,0,0,0.05), pch = 19)
+plot(icw ~ like_sim$overlap, col = rgb(0,0,0,0.05), pch = 19)
 
 
+filt <- like_sim$par_values[, "ndvi"] < -5 &
+        like_sim$par_values[, "ndvi"] > -195 &
+        like_sim$par_values[, "elev"] < 25 &
+        like_sim$par_values[, "grassland"] > -25
+
+for(p in par_names) {
+  plot(error_fit[filt] ~ like_sim$par_values[filt, p], xlab = p,
+       col = rgb(0,0,0,0.05), pch = 19)
+}
+
+mean(abs(error_fit))
+mean(abs(error_fit[filt]))
+
+sigma(gam_norm)
+mean(error_fit)
+
+like_sim$fitted <- fnorm
+wave_plot(like_sim, "fitted", alpha = 0.05)
+
+# PROBAR SI ESTO MEJORA CON N_REP = 30 ------------------------------------
+# Y agregar términos al modelo.?
+#
+# Antes comparar con un MCMC
+# probar estas cosas por un día. Si no anda, usar la estrategia binaria y ya.
+
+# No, n_rep = 30 no mejora.
+
+# Si vuelvo a similar de nuevo las mismas partículas, qué obtengo? --------
+
+sim_repeat <- similarity_simulate_parallel(like_sim$par_values,
+                                           spread_data, n_rep)
+sim_repeat_20 <- similarity_simulate_parallel(like_sim$par_values,
+                                              spread_data, n_sim = 20)
+sim_repeat_10 <- similarity_simulate_parallel(like_sim$par_values,
+                                              spread_data, n_sim = 10)
+
+
+par(mfrow = c(2, 2))
+plot(sim_repeat$overlap ~ like_sim$overlap,
+     col = rgb(0,0,0,0.05), pch = 19, main = "30")
+abline(0, 1, col = "red")
+
+plot(sim_repeat_20$overlap ~ like_sim$overlap,
+     col = rgb(0,0,0,0.05), pch = 19, main = "20")
+abline(0, 1, col = "red")
+
+plot(sim_repeat_10$overlap ~ like_sim$overlap,
+     col = rgb(0,0,0,0.05), pch = 19, main = "10")
+abline(0, 1, col = "red")
+par(mfrow = c(1, 1))
+
+
+# KNN? --------------------------------------------------------------------
+
+# En vez de ajustar un modelo, predecir con los knn
+
+??knn
+
+library(caret)
+
+
+
+inTrain <- createDataPartition(like_sim$overlap, p = .9)[[1]]
+
+trainX <- like_sim$par_values[inTrain, ]
+trainY <- like_sim$overlap[inTrain]
+
+testX <- like_sim$par_values[-inTrain, ]
+testY <- like_sim$overlap[-inTrain]
+
+for(kn in 3:15) {
+  fit <- knnreg(trainX, trainY, k = kn)
+  plot(testY, predict(fit, testX),
+       col = rgb(0,0,0,0.1), pch = 19, main = kn)
+  abline(0, 1, col = "red")
+}
+
+
+# Conclusiones ------------------------------------------------------------
+
+# Vamos con el GAM binario, usando n_rep = 20, y 40000 simulaciones en total.
+# Ajustar un modelo para el overlap es muy difícil; requeriría explorar
+# muy bien el espacio de parámetros.

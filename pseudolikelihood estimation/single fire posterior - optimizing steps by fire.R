@@ -1,17 +1,10 @@
-# This code inherits from
-# <single fire posterior - surrogate vs. simulator - extended.R>.
+# Explore the overlap function by fire to get the best steps value. This value
+# will be used to fit the posterior distribution of the fixed-effects parameters
+# conditional on the optimal steps.
 
-# There I tried many ways to fit a good surrogate model, and also tried to
-# get a surrogate for a kernel-transformed similarity. But that did not work.
-
-# The current solution is to define an overlap threshold and fit a binary GAM
-# to predict where the overlap is above the threshold. To fit the mixed model,
-# we would sample the probability, not simulating the Bernoulli event.
-
-# The current problem is that the surrogate has high uncertainty in some regions
-# of the parameter space, generating bias in the resulting posterior.
-# Here I simulate more data and refit the model a few times to get reasonable
-# uncertainty where it is too high (model-based design).
+# The exploration procedure could be cheaper than before, as we are only
+# interested in the optimum.
+# Try using bayesian optimization (GP).
 
 # Packages ----------------------------------------------------------------
 
@@ -61,12 +54,6 @@ registerDoMC(n_cores)
 data_dir <- file.path("data", "focal fires data", "landscapes")
 filenames <- list.files(data_dir)
 
-# load file with constants to standardize
-ndvi_params <- readRDS(file.path("data", "NDVI_regional_data",
-                                 "ndvi_optim_and_proportion.rds"))
-
-slope_sd <- ndvi_params$slope_term_sd
-
 # dir to save output
 target_dir <- file.path("files", "pseudolikelihood_estimation")
 
@@ -80,52 +67,7 @@ par_names <- c("forest", "shrubland", "grassland",
 # number of fires to simulate by particle
 n_rep <- 20
 
-ext_alpha <- 50
-ext_beta <- 30
-
-params_lower <- c("forest" = -ext_alpha,
-                  "shrubland" = -ext_alpha,
-                  "grassland" = -ext_alpha,
-                  "ndvi" = -ext_beta,
-                  "north" = 0,
-                  "elev" = -ext_beta,
-                  "slope" = 0,
-                  "wind" = 0,
-                  "steps" = 5)
-
-params_upper <- c("forest" = ext_alpha,
-                  "shrubland" = ext_alpha,
-                  "grassland" = ext_alpha,
-                  "ndvi" = 0,
-                  "north" = ext_beta,
-                  "elev" = 0,
-                  "slope" = ext_beta / slope_sd, # because it is not standardized
-                  "wind" = ext_beta,
-                  "steps" = NA)       # to be filled later, varies by fire
-
-
-## PROBAMOS ELIMINANDO DIMENSIONES
-params_lower <- c("forest" = -ext_alpha,
-                  "shrubland" = -ext_alpha,
-                  "grassland" = -ext_alpha,
-                  "ndvi" = -1e-5,
-                  "north" = -1e-5,
-                  "elev" = -ext_beta,#-1e-5,
-                  "slope" = 0,
-                  "wind" = 0,
-                  "steps" = 5)
-
-params_upper <- c("forest" = ext_alpha,
-                  "shrubland" = ext_alpha,
-                  "grassland" = ext_alpha,
-                  "ndvi" = 1e-5,
-                  "north" = 1e-5,
-                  "elev" = 0, #1e-5,
-                  "slope" = ext_beta / slope_sd, # because it is not standardized
-                  "wind" = ext_beta,
-                  "steps" = NA)       # to be filled later, varies by fire
-
-gam_formula_bern_full <- formula(
+gam_formula_bern <- formula(
   y ~
     # marginal effects
     s(forest, bs = basis, k = k_side) +
@@ -157,7 +99,7 @@ gam_formula_bern_full <- formula(
     ti(grassland, slope, k = k_int, bs = basis) +
     ti(grassland, wind, k = k_int, bs = basis) +
 
-    # other interactions
+
     ti(elev, slope, k = k_int, bs = basis) +
     ti(elev, wind, k = k_int, bs = basis) +
     ti(elev, ndvi, k = k_int, bs = basis) +
@@ -165,87 +107,7 @@ gam_formula_bern_full <- formula(
     ti(north, ndvi, k = k_int, bs = basis)
 )
 
-# sin las dimensiones quitadas
-gam_formula_bern_reduced <- formula(
-  y ~
-    # marginal effects
-    s(forest, bs = basis, k = k_side) +
-    s(shrubland, bs = basis, k = k_side) +
-    s(grassland, bs = basis, k = k_side) +
-    # s(ndvi, bs = basis, k = k_side) +
-    # s(north, bs = basis, k = k_side) +
-    # s(elev, bs = basis, k = k_side) +
-    s(slope, bs = basis, k = k_side) +
-    s(wind, bs = basis, k = k_side) +
-    s(steps, bs = basis, k = k_side) +
 
-    # interactions (intercepts)
-    # ti(forest, ndvi, k = k_int, bs = basis) +
-    # ti(forest, north, k = k_int, bs = basis) +
-    # ti(forest, elev, k = k_int, bs = basis) +
-    ti(forest, slope, k = k_int, bs = basis) +
-    ti(forest, wind, k = k_int, bs = basis) +
-
-    # ti(shrubland, ndvi, k = k_int, bs = basis) +
-    # ti(shrubland, north, k = k_int, bs = basis) +
-    # ti(shrubland, elev, k = k_int, bs = basis) +
-    ti(shrubland, slope, k = k_int, bs = basis) +
-    ti(shrubland, wind, k = k_int, bs = basis) +
-
-    # ti(grassland, ndvi, k = k_int, bs = basis) +
-    # ti(grassland, north, k = k_int, bs = basis) +
-    # ti(grassland, elev, k = k_int, bs = basis) +
-    ti(grassland, slope, k = k_int, bs = basis) +
-    ti(grassland, wind, k = k_int, bs = basis) +
-
-    # other interactions
-    # ti(elev, slope, k = k_int, bs = basis) +
-    # ti(elev, wind, k = k_int, bs = basis) +
-    # ti(elev, ndvi, k = k_int, bs = basis) +
-    ti(slope, wind, k = k_int, bs = basis) #+
-  # ti(north, ndvi, k = k_int, bs = basis)
-)
-
-# incluyendo alguna dimensión que no haga nada: elev con sus interaccs
-gam_formula_bern_extra <- formula(
-  y ~
-    # marginal effects
-    s(forest, bs = basis, k = k_side) +
-    s(shrubland, bs = basis, k = k_side) +
-    s(grassland, bs = basis, k = k_side) +
-    # s(ndvi, bs = basis, k = k_side) +
-    # s(north, bs = basis, k = k_side) +
-    s(elev, bs = basis, k = k_side) +
-    s(slope, bs = basis, k = k_side) +
-    s(wind, bs = basis, k = k_side) +
-    s(steps, bs = basis, k = k_side) +
-
-    # interactions (intercepts)
-    # ti(forest, ndvi, k = k_int, bs = basis) +
-    # ti(forest, north, k = k_int, bs = basis) +
-    # ti(forest, elev, k = k_int, bs = basis) +
-    ti(forest, slope, k = k_int, bs = basis) +
-    ti(forest, wind, k = k_int, bs = basis) +
-
-    # ti(shrubland, ndvi, k = k_int, bs = basis) +
-    # ti(shrubland, north, k = k_int, bs = basis) +
-    # ti(shrubland, elev, k = k_int, bs = basis) +
-    ti(shrubland, slope, k = k_int, bs = basis) +
-    ti(shrubland, wind, k = k_int, bs = basis) +
-
-    # ti(grassland, ndvi, k = k_int, bs = basis) +
-    # ti(grassland, north, k = k_int, bs = basis) +
-    # ti(grassland, elev, k = k_int, bs = basis) +
-    ti(grassland, slope, k = k_int, bs = basis) +
-    ti(grassland, wind, k = k_int, bs = basis) +
-
-    # other interactions
-    ti(elev, slope, k = k_int, bs = basis) +
-    ti(elev, wind, k = k_int, bs = basis) +
-    # ti(elev, ndvi, k = k_int, bs = basis) +
-    ti(slope, wind, k = k_int, bs = basis) #+
-  # ti(north, ndvi, k = k_int, bs = basis)
-)
 # Functions ---------------------------------------------------------------
 
 normalize <- function(x) x / sum(x)
@@ -586,10 +448,10 @@ explore_likelihood <- function(data, n = 600, var_factor = 1, n_best = "all",
                                phase = NULL) {
 
   ### Testo
-  # data = wave1; n = 500; p_best = 0.15; prob_fn = NULL;
+  # data = sim1; n = 500; p_best = 0.15; prob_fn = NULL;
   # support = sup; spread_data = spread_data;
   # centre = "global"; sobol = TRUE;
-  # pow = 1; var_factor = 1; accept_thres = NULL
+  # pow = 1; var_factor = 1
   ### endo testo
 
   # if threshold is used, ignore p_best
@@ -900,9 +762,13 @@ reduce_support <- function(x, support, prop = 0.75) {
 }
 
 
-# Simulation waves ---------------------------------------------------------
+# Parameter space settings -----------------------------------------------
 
-fire_file <- "2000_34.rds"#"2000_8.rds"#"2015_53.rds"#"2008_3.rds" #"1999_25j.rds"#"2008_3.rds" #
+ext_alpha <- 30
+ext_beta <- 30
+ext_ndvi <- 200
+
+fire_file <- "2008_3.rds" #"2000_8.rds"#"2015_53.rds"#"1999_25j.rds"#"2000_8.rds"#filenames[f] # #"1999_25j.rds"#
 fire_name <- strsplit(fire_file, ".rds")[[1]]
 print(paste("Fire:", fire_name))
 full_data <- readRDS(file.path(data_dir, fire_file))
@@ -911,20 +777,47 @@ spread_data <- full_data[c("landscape", "ig_rowcol",
                            "burned_layer", "burned_ids")]
 
 bb <- get_bounds(fire_data = spread_data)
+
+params_lower <- c("forest" = -ext_alpha,
+                  "shrubland" = -ext_alpha,
+                  "grassland" = -ext_alpha,
+                  "ndvi" = -ext_ndvi,
+                  "north" = 0,
+                  "elev" = -ext_beta,
+                  "slope" = 0,
+                  "wind" = 0,
+                  "steps" = 5)
+
+params_upper <- c("forest" = ext_alpha,
+                  "shrubland" = ext_alpha,
+                  "grassland" = ext_alpha,
+                  "ndvi" = 0,
+                  "north" = ext_beta * 2,
+                  "elev" = 0,
+                  "slope" = ext_beta * 2,
+                  "wind" = ext_beta,
+                  "steps" = bb["largest", "steps_used"])
+
 sup <- rbind(params_lower, params_upper)
-sup[2, "steps"] <- bb["largest", "steps_used"]
+
+# Simulation waves --------------------------------------------------------
+
 
 # Explore likelihood
 # Phase 1: sobol
 registerDoMC(15)
 
-ss <- sobol(n = 10000, dim = n_coef)
+sobol_n <- 1000
+kw <- 4
+npw <- sobol_n / kw
+
+ss <- sobol(n = npw * kw, dim = n_coef)
 particles <- scale_params(ss, sup)
-waves_1 <- rep(1:20, each = 500)
+waves_1 <- rep(1:kw, each = npw)
 # loop to save
 wave1 <- NULL
 print(paste("Phase: sobol. Fire: ", fire_name, sep = ""))
-for(w in 1:20) {
+for(w in 1:kw) {
   # w = 1
   wlocal <- similarity_simulate_parallel(particles[waves_1 == w, ],
                                          spread_data)
@@ -940,10 +833,42 @@ for(w in 1:20) {
   print(paste("wave ", w, ", overlap max: ", rr, sep = ""))
 }
 
-# wave 2: reproduce 15 % best (500 * 20 = 10000)
+npw_high <- 100
+ntot <- 9000
+
+print(paste("Phase: search maximum. Fire: ", fire_name, sep = ""))
+wave6 <- explore_likelihood_iterate(
+  n_waves = ntot / npw_high, data = wave1, n = npw_high, n_best = 50,
+  var_factor = c(1.5, 2, 1, 3),
+  support = sup, spread_data = spread_data,
+  centre = "global", sobol = TRUE, phase = "search_maximum",
+  write = F, fire_name = fire_name
+)
+
+wave_plot(wave6)
+
+like_sim <- wave6
+
+optim_row <- which.max(like_sim$overlap)
+overlap_max <- like_sim$overlap[optim_row]
+(optim_params <- round(like_sim$par_values[optim_row, n_coef], 0))
+
+# 2000_8 anduvo muy bien con 2000 sobol + 8000 reproduciendo las 50 mejores
+# y tirando de a 100
+
+# 1999_25j con 1000 iniciales llegó a 0.8044, con steps = 111
+# 1999_25j con 2000 iniciales llegó a 0.8056, con steps = 112
+
+# Cool. repetir esto para todos los fuegos.
+
+
+
+
+
+# wave 2: reproduce 15 % best (500 * 20)
 print(paste("Phase: search higher. Fire: ", fire_name, sep = ""))
 wave2 <- explore_likelihood_iterate(
-  n_waves = 20, data = wave1, n = 500, p_best = 0.15,
+  n_waves = 10, data = wave1, n = 500, p_best = 0.10,
   var_factor = c(1.5, 2, 1),
   support = sup, spread_data = spread_data,
   centre = "global", sobol = TRUE, phase = "search_higher",
@@ -951,90 +876,53 @@ wave2 <- explore_likelihood_iterate(
 )
 # wave_plot(wave2)
 
-# 10000 iter reproducing the 100 best, to reach the max
+# 5000 iter reproducing the 500 best, only to reach the max
 print(paste("Phase: search maximum. Fire: ", fire_name, sep = ""))
-wave4 <- explore_likelihood_iterate(
-  n_waves = 100, data = wave2, n = 100, n_best = 100,
+wave3 <- explore_likelihood_iterate(
+  n_waves = 10, data = wave2, n = 500, n_best = 500,
   var_factor = c(1.5, 2, 1),
   support = sup, spread_data = spread_data,
   centre = "global", sobol = TRUE, phase = "search_maximum",
   write = F, fire_name = fire_name
 )
 
-thres <- max(wave4$overlap) - 0.05
-# wave_plot(wave4, alpha = 0.1, thres = thres)
-
-# 10000 iter above thres
-print(paste("Phase: above threshold. Fire: ", fire_name, sep = ""))
-wave5 <- explore_likelihood_iterate(
-  n_waves = 20, data = wave4, n = 500, accept_thres = thres,
+print(paste("Phase: search maximum. Fire: ", fire_name, sep = ""))
+wave4 <- explore_likelihood_iterate(
+  n_waves = 20, data = wave3, n = 500, n_best = 100,
   var_factor = c(1.5, 2, 1),
   support = sup, spread_data = spread_data,
-  centre = "global", sobol = TRUE, phase = "above_threshold",
+  centre = "global", sobol = TRUE, phase = "search_maximum",
+  write = F, fire_name = fire_name
+)
+
+print(paste("Phase: search maximum. Fire: ", fire_name, sep = ""))
+wave5 <- explore_likelihood_iterate(
+  n_waves = 20, data = wave4, n = 500, n_best = 100,
+  var_factor = c(1.5, 2, 1),
+  support = sup, spread_data = spread_data,
+  centre = "global", sobol = TRUE, phase = "search_maximum",
+  write = F, fire_name = fire_name
+)
+
+print(paste("Phase: search maximum. Fire: ", fire_name, sep = ""))
+wave6 <- explore_likelihood_iterate(
+  n_waves = 20, data = wave5, n = 500, n_best = 100,
+  var_factor = c(1.5, 2, 1),
+  support = sup, spread_data = spread_data,
+  centre = "global", sobol = TRUE, phase = "search_maximum",
   write = F, fire_name = fire_name
 )
 
 
-like_sim <- wave5
+like_sim <- wave6
+like_sim <- wave4 # con el wave 4 ya llegaba al step óptimo
 
-# wave_plot(like_sim[like_sim$overlap > 0.5, ], alpha = 0.1,
-#           thres = thres)
+wave_plot(like_sim[like_sim$overlap > max(like_sim$overlap) * 0.7, ],
+          alpha = 0.1)
 
+optim_row <- which.max(like_sim$overlap)
+overlap_max <- like_sim$overlap[optim_row]
+optim_params <- round(like_sim$par_values[optim_row, ], 0)
 
-# Fit gam -----------------------------------------------------------------
-
-data_gam_bern <- as.data.frame(cbind(like_sim$par_values,
-                                     y = as.numeric(like_sim$overlap >= thres)))
-
-k_side <- 15
-k_int <- 6
-basis <- "cr"
-
-# formula_use <- gam_formula_bern_reduced
-# formula_use <- gam_formula_bern_extra
-formula_use <- gam_formula_bern_full
-
-gam_bern <- bam(
-  formula_use, data = data_gam_bern, family = "binomial",
-  method = "fREML", discrete = T, nthreads = 8
-)
-summary(gam_bern)
-
-fbern <- fitted(gam_bern)
-
-# Sample GAM-approximated posterior
-
-# print(paste("Sampling posterior. Fire: ", fire_name, sep = ""))
-sup_reduced <- reduce_support(like_sim$par_values[like_sim$overlap >= thres, ],
-                              sup, 0.5)
-r_gam <- rejection_sample_parallel(300, gam_bern, sup_reduced, cores = 15)
-draws <- do.call("rbind", r_gam) %>% as.data.frame
-
-# par(mfrow = c(3, 3))
-# for(i in 1:ncol(draws)) {
-#   dd <- density(draws[, i], from = sup[1, i], to = sup[2, i])
-#   plot(dd, main = names(draws)[i],
-#        ylim = c(0, max(dd$y) * 1.05),
-#        xlim = sup[, i], ylab = NA, xlab = NA)
-# }
-# par(mfrow = c(1, 1))
-
-# ff <- like_sim$overlap >= thres
-# plot(like_sim$par_values[ff, "forest"] ~ like_sim$par_values[ff, "elev"])
-# plot(like_sim$par_values[ff, "wind"] ~ like_sim$par_values[ff, "elev"])
-
-# Check GAM ---------------------------------------------------------------
-
-ids <- sample(1:nrow(draws), size = 2000, replace = F)
-ppmat <- as.matrix(draws[ids, ])
-
-overlap_check <- similarity_simulate_parallel(particles = ppmat,
-                                              fire_data = spread_data)
-hist(overlap_check$overlap, xlim = c(0, 1), main = fire_name)
-abline(v = thres, col = 2, lwd = 2)
-abline(v = mean(overlap_check$overlap), col = 4, lwd = 2)
-sum(overlap_check$overlap >= thres) / nrow(overlap_check)
-
-sum(like_sim$overlap >= thres) / nrow(like_sim)
 
 

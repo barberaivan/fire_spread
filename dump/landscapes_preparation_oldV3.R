@@ -172,7 +172,7 @@ for(i in 1:n_fires) {
   windspeed_vals[[i]] <- values(vel)
 }
 
-wind_sd <- mean(unlist(lapply(windspeed_vals, sd))) # ~ 1.14 # to standardize
+wind_sd <- sd(unlist(windspeed_vals)) # ~ 1.46 # to standardize
 
 # Import ignition points --------------------------------------------------
 
@@ -204,38 +204,48 @@ fwi_data <- left_join(fwi_left, fwi_raw, by = "fire_id_match")
 dveg <- readxl::read_excel("/home/ivan/Insync/Mapa vegetación WWF - Lara et al. 1999/clases de vegetacion y equivalencias.xlsx",
                            sheet = "Sheet2")
 
-# recode vegetation type in 5 classes
+dveg$cnum3 <- c(0, 0, 0, 0, 1, 2, 1, 0, 99, 99, 99)
+# urban is taken as forest so its burn probability changes markedly with NDVI.
 
-n_veg_types <- 5
-veg_names <- c("wet", "subalpine", "dry", "shrubland", "grassland")
+# Import NDVI parameters estimates and other stuff ------------------------
 
-dveg$class5 <- plyr::revalue(dveg$class1,
-                             replace = c(
-                               "Araucaria forest" = "Dry forest",
-                               "Cipres forest" = "Dry forest",
-                               "Plantation" = "Shrubland",
-                               "Urban" = "Grassland",
-                               "Water" = "Non burnable",
-                               "High andean" = "Non burnable",
-                               "Ice and snow" = "Non burnable"
-                             ))
+ndvi_params <- readRDS(file.path("data", "NDVI_regional_data",
+                                 "ndvi_optim_and_proportion.rds"))
 
-dveg$class5 <- factor(dveg$class5, levels = c(
-  "Wet forest", "Subalpine forest", "Dry forest", "Shrubland", "Grassland",
-  "Non burnable"
-))
+# model to detrend ndvi
+mdetrend <- readRDS(file.path("data", "NDVI_regional_data",
+                              "ndvi_detrender_model.rds"))
 
-dveg$cnum5 <- as.numeric(dveg$class5) - 1
-dveg$cnum5[dveg$class5 == "Non burnable"] <- 99
 
+# Northing importance function (slope weighting) --------------------------
+
+# x is the slope steepness, in degrees
+northing_weight <- function(x, a = -5, b = 0.35) {
+  plogis(a + b * x)
+}
+
+# northing_weighted <- cos(aspect * pi / 180) *
+#                      northing_weight(slope)
 
 # Make landscapes ---------------------------------------------------------
 
-# The landscape array will have the vegetation layer, and then terraion:
-#   elev = elevation, wdir = wind direction, wspeed = windspeed
+# Landscape layers names in FireSpread package
+# enum land_names {
+#   veg,    # {0: forest, 1: shrubland, 2: grassland, 99: non-burnable}
+#   ndvi    # scale(pi[v] * (ndvi - optim[v]) ^ 2, center = F)
+#   north,  # scale(slope-weighted northing, center = F)
+#   elev,   # scale(elevation)
+#   wdir,
+#   wspeed, # scale(wspeed, center = F)
+# };
+
+# Note that elevation is centred and scaled, but the other terms are only scaled.
+# The slope term is not going to be scaled because it would require to
+# compute more things during the simulation. However, its sd will be used
+# to scale its beta to be compared with other betas.
 
 # (using the same order here)
-land_names <- c("veg", "elev", "wdir", "wspeed")
+land_names <- c("veg", "ndvi", "north", "elev", "wdir", "wspeed")
 
 # list with landscapes
 lands <- vector(mode = "list", length = n_fires)
@@ -245,8 +255,7 @@ names(lands) <- fire_ids
 elem_names <- c("landscape", "ig_rowcol",
                 "burned_layer", "burned_ids",
                 "landscape_img",
-                "fire_id", "fire_id_spread",
-                "cells_by_veg")
+                "fire_id", "fire_id_spread")
 # landscape includes vegetation, but the spread function uses this separately.
 # landscape_img is saved for plotting purposes, and contains the original
 # layers.
@@ -254,7 +263,7 @@ elem_names <- c("landscape", "ig_rowcol",
 # fire_id
 
 for(i in 1:n_fires) {
-  # i = 1
+  # i = 44
   print(i)
 
   lands[[i]] <- vector(mode = "list", length = length(elem_names))
@@ -264,20 +273,90 @@ for(i in 1:n_fires) {
   lands[[i]]$fire_id <- wind_table$fire_id[wind_table$fire_id_sep == fire_ids[i]]
 
   # create landscape image
-  landscape_img <- raw_imgs[[i]][[c("veg", "elevation", "burned")]]
+  landscape_img <- raw_imgs[[i]][[c("veg", "ndvi_prev", "elevation", "slope",
+                                     "aspect", "burned")]]
+  names(landscape_img) <- c("veg", "ndvi_prev_dt", "elevation", "slope",
+                            "aspect", "burned")
 
   ## Vegetation type
   veg_img <- raw_imgs[[i]]$veg
-  veg_img <- subst(veg_img, NaN, 11) # make NaN Ice and Snow (non-burnable)
-  # duplicate to reclassify
-  veg_img_reclass <- veg_img
-  values(veg_img_reclass) <- NA
-  unique_vegs_raw <- unique(veg_img)[, 1]
+  veg_img <- subst(veg_img, NaN, 9) # make NaN non-burnable
 
-  # cnum1 is the number label in the image.
-  for(v in unique_vegs_raw) {
-    veg_img_reclass[veg_img == v] <- dveg$cnum5[dveg$cnum1 == v]
+  veg_img[veg_img %in% dveg$cnum1[dveg$cnum3 == 0]] <- 0 # forests
+  veg_img[veg_img %in% dveg$cnum1[dveg$cnum3 == 1]] <- 1 # shrublands
+  veg_img[veg_img %in% dveg$cnum1[dveg$cnum3 == 2]] <- 2 # shrublands
+  veg_img[veg_img %in% dveg$cnum1[dveg$class2 == "Non burnable"]] <- 99 # non-burnable
+
+  ## NDVI
+  ndvi_img <- raw_imgs[[i]]$ndvi_prev
+
+  # get year to detrend NDVI
+  fire_date <- fwi_data$date[fwi_data$fire_id == fire_ids[i]]
+  fire_date <- as.Date(fire_date, format = "%Y-%m-%d")
+  fire_month <- month(fire_date)
+  fire_year <- ifelse(fire_month >= 7, year(fire_date) + 1, year(fire_date))
+
+  # detrend NDVI, convert to 2022 equivalent
+  if((fire_year - 1) < 2022) {
+    ndvi_22_img <- raw_imgs[[i]]$ndvi_22
+
+    dpred_ndvi <- data.frame(
+      ndvi_dyn_logit = as.numeric(qlogis((values(ndvi_img) + 1) / 2)),
+      ndvi01_22 = as.numeric((values(ndvi_22_img) + 1) / 2),
+      year = fire_year - 1 # because NDVI is from the previous year
+    )
+    anyNA(dpred_ndvi)
+    dpred_ndvi$diff_logit <- mgcv::predict.gam(mdetrend, dpred_ndvi, se.fit = F)
+    dpred_ndvi$ndvi_dt <- plogis(dpred_ndvi$ndvi_dyn_logit - dpred_ndvi$diff_logit) * 2 - 1
+    values(ndvi_img) <- as.numeric(dpred_ndvi$ndvi_dt)
   }
+  # check detrend:
+  # plot(values(ndvi_img) ~ values(raw_imgs[[i]]$ndvi_prev))
+  # summary(values(ndvi_img))
+  # summary(values(raw_imgs[[i]]$ndvi_prev))
+
+  # Compute scaled NDVI terms. The shrubland and grassland are
+  # multiplied by a proportion relative to forest, so all the terms may be
+  # later multiplied by the same b_ndvi, which corresponds to forest as the
+  # reference.
+  # (b_ndvi[Shrubland] = b_ndvi * pi_ndvi[Shrubland])
+
+  ndvi_dt <- values(ndvi_img)
+
+  # put detrended ndvi in the landscape_img
+  values(landscape_img$ndvi_prev_dt) <- ndvi_dt
+
+  ndvi_term <- ndvi_dt
+  veg_values <- values(veg_img)
+
+  for(v in 0:2) { # zero-indexing
+    # compute quadratic term
+    # v = 1
+    temp <-
+      ndvi_params$pi_ndvi_mean[v+1] *
+      (ndvi_dt[veg_values == v] -
+       ndvi_params$optim_ndvi_mean[v+1]) ^ 2
+
+    # scale using the globlal sd of the term
+    ss <- ndvi_params$ndvi_term_sd
+
+    ndvi_term[veg_values == v] <- temp / ss
+
+    # # check standardization:
+    # hist(ndvi_term[veg_values == v], main = v, breaks = 10)
+  }
+  # hist(ndvi_term)
+
+  ndvi_term[veg_values == 99] <- 0 # non burnable makes nothing
+
+  values(ndvi_img) <- as.numeric(ndvi_term)
+  names(ndvi_img) <- "ndvi"
+  # plot(hist(values(ndvi_img)))
+  # plot(hist(ndvi_term))
+  # plot(hist(ndvi_dt))
+  # # check ndvi term:
+  # plot(ndvi_term[veg_values != 99] ~
+  #      ndvi_dt[veg_values != 99])
 
   ## Wind
 
@@ -292,18 +371,36 @@ for(i in 1:n_fires) {
   # scale windspeed
   wind_local$wspeed <- wind_local$wspeed / wind_sd
 
+  ## northing
+  aspect_vals <- values(raw_imgs[[i]]$aspect)
+  northing <- cos(aspect_vals * pi / 180) *
+              northing_weight(values(raw_imgs[[i]]$slope))
+  north_img <- raw_imgs[[i]]$aspect
+
+  # scale northing!
+  values(north_img) <- northing / ndvi_params$northing_sd
+  names(north_img) <- "north"
+
   ## elevation (standardized)
   elev_img <- raw_imgs[[i]]$elevation
+  values(elev_img) <- (values(elev_img) - ndvi_params$elevation_mean) /
+                      ndvi_params$elevation_sd
   names(elev_img) <- "elev"
 
   # merge all data in a single raster
-  rall <- c(veg_img_reclass, elev_img, wind_local)
+  rall <- c(veg_img, ndvi_img, north_img, elev_img, wind_local)
+
+  # make non-burnable the nan vegetation
+  # rall$burnable[is.nan(rall$veg)] <- 0
 
   # identify NA in the predictors to make those pixels unburnable
   vv <- values(rall)
 
+  # burned image
+  burned_img <- raw_imgs[[i]]$burned
+
   # identify burnable cells with NA values
-  na_cells <- which(apply(vv, 1, anyNA))
+  na_cells <- which(apply(vv[vv[, "veg"] != 99, ], 1, anyNA))
 
   # make the na non-burnable
   vv[na_cells, "veg"] <- 99
@@ -327,9 +424,6 @@ for(i in 1:n_fires) {
   lands[[i]]$landscape <- land_arr
   lands[[i]]$landscape_img <- landscape_img # save as terra raster with original
                                             # values of predictors, to make maps
-
-  # burned image
-  burned_img <- raw_imgs[[i]]$burned
   lands[[i]]$burned_layer <- land_cube(burned_img)[, , 1]
   lands[[i]]$burned_layer[is.na(lands[[i]]$burned_layer)] <- 0
 
@@ -339,15 +433,21 @@ for(i in 1:n_fires) {
   colnames(burned_rowcols) <- c("row", "col")
   lands[[i]]$burned_ids <- t(burned_rowcols) - 1 # for 0-indexing!
 
-  # cells by vegetation type in available and burned
-  veg_vec <- as.vector(land_arr[, , "veg"])
-  cells_by_veg <- integer(n_veg_types)
-  names(cells_by_veg) <- veg_names
-  for(k in 1:n_veg_types) {
-    cells_by_veg[k] <- sum(veg_vec == (k-1)) # zero-indexing
-  }
+  # DO NOT COUNT VEG_VEC FOR NOW
 
-  lands[[i]]$cells_by_veg <- cells_by_veg
+  # # pixels by vegetation type in available and burned
+  # veg_vec <- as.vector(land_arr[, , "veg"]) - 1 # 0 is non burnable now.
+  # n_veg_types <- length(unique(veg_vec[veg_vec > 0]))
+  # counts_veg <- integer(n_veg_types)
+  # counts_veg_available <- integer(n_veg_types)
+  # for(k in 1:n_veg_types) {
+  #   available <- as.numeric(veg_vec == (k-1))
+  #   counts_veg[k] <- sum(available * v[, "burned"])
+  #   counts_veg_available[k] <- sum(available)
+  # }
+  #
+  # lands[[i]]$counts_veg <- counts_veg
+  # lands[[i]]$counts_veg_available <- counts_veg_available
 
   # get ignition points
   p_local <- points[points$Name == fire_ids[i]]
@@ -371,7 +471,7 @@ for(i in 1:n_fires) {
 
 # # Checks:
 # f <- 43
-# v <- 4
+# v <- 6
 # l <- land_names[v]
 # xxx <- lands[[f]]$landscape[, , l] %>% as.numeric
 # sum(xxx != -9999) / length(xxx)
@@ -401,7 +501,7 @@ for(i in 1:n_fires) {
 }
 all(ccc == 2) # OK
 
-object.size(lands) / 1e6 # 1884.2 Mb
+object.size(lands) / 1e6 # 2627.7 Mb
 
 # sapply(lands, class) %>% unique # OK
 
@@ -419,58 +519,56 @@ for(i in 1:length(lands)) {
 }
 
 
+
+
 # Evaluate relative abundance of veg types in landscapes ------------------
 
-# dveg
-#
-# # table with counts of veg types by fire
-# nv <- 7
-# veg_counts <- matrix(0, n_fires, nv)
-# colnames(veg_counts) <- dveg$class1[1:nv]
-#
-# for(f in 1:n_fires) {
-#   # f = 2
-#   veg_img <- raw_imgs[[f]]$veg
-#   vals <- values(veg_img) %>% as.vector
-#   tt <- table(vals)
-#   names(tt)
-#
-#   class_present <- as.numeric(names(tt))
-#   class_eval <- class_present[class_present %in% (1:nv)]
-#   ttsub <- tt[as.character(class_eval)]
-#
-#   for(c in 1:length(class_eval)) {
-#     veg_counts[f, class_eval[c]] <- ttsub[c]
-#   }
-# }
-#
-# veg_props <- apply(veg_counts, 1, function(x) x / sum(x)) %>% t
-#
-# par(mfrow = c(2, 4))
-# for(v in 1:nv) {
-#   hist(veg_props[, v], breaks = seq(0, 1, by = 0.1),
-#        main = colnames(veg_props)[v],
-#        xlim = c(0, 1), xlab = "Relative abundance\nin landscape")
-# }
-# par(mfrow = c(1, 1))
-#
-# # > 5 % in how many fires?
-# apply(veg_props, 2, function(x) sum(x < 0.05)) %>% t %>% t
-#
-# # Condense araucaria and cypres as dry forest, and plantation as shrubland
-# veg_props_sub <- cbind(
-#   veg_props[, c("Wet forest", "Subalpine forest")],
-#   "Dry forest" = rowSums(veg_props[, c("Araucaria forest", "Cipres forest")]),
-#   "Shrubland" = rowSums(veg_props[, c("Shrubland", "Plantation")]),
-#   veg_props[, "Grassland"]
-# )
+dveg
 
-veg_counts <- do.call("rbind", lapply(lands, function(x) x[["cells_by_veg"]]))
-veg_props <- apply(veg_counts, 1, function(x) x / sum(x))  %>% t
+# table with counts of veg types by fire
+nv <- 7
+veg_counts <- matrix(0, n_fires, nv)
+colnames(veg_counts) <- dveg$class1[1:nv]
 
-# Number of veg types with more than thres % cover by landscape
-thres <- 0.05
-veg_num <- apply(veg_props, 1, function(x) sum(x >= 0.05)) %>% t %>% t
+for(f in 1:n_fires) {
+  # f = 2
+  veg_img <- raw_imgs[[f]]$veg
+  vals <- values(veg_img) %>% as.vector
+  tt <- table(vals)
+  names(tt)
+
+  class_present <- as.numeric(names(tt))
+  class_eval <- class_present[class_present %in% (1:nv)]
+  ttsub <- tt[as.character(class_eval)]
+
+  for(c in 1:length(class_eval)) {
+    veg_counts[f, class_eval[c]] <- ttsub[c]
+  }
+}
+
+veg_props <- apply(veg_counts, 1, function(x) x / sum(x)) %>% t
+
+par(mfrow = c(2, 4))
+for(v in 1:nv) {
+  hist(veg_props[, v], breaks = seq(0, 1, by = 0.1),
+       main = colnames(veg_props)[v],
+       xlim = c(0, 1), xlab = "Relative abundance\nin landscape")
+}
+par(mfrow = c(1, 1))
+
+# > 5 % in how many fires?
+apply(veg_props, 2, function(x) sum(x < 0.05)) %>% t %>% t
+
+# Condense araucaria and cypres as dry forest, and plantation as shrubland
+veg_props_sub <- cbind(
+  veg_props[, c("Wet forest", "Subalpine forest")],
+  "Dry forest" = rowSums(veg_props[, c("Araucaria forest", "Cipres forest")]),
+  "Shrubland" = rowSums(veg_props[, c("Shrubland", "Plantation")]),
+  veg_props[, "Grassland"]
+)
+
+# Number of veg types with more than 5 % cover by landscape
+veg_num <- apply(veg_props_sub, 1, function(x) sum(x >= 0.05)) %>% t %>% t
 table(veg_num)
 
 # Check landscape size of those with five
@@ -481,36 +579,3 @@ barplot(fire_size_rel)
 fire_size_rel[veg_num == 5]
 # most of them are small; Try GAMs with those, to see if the reduction is needed.
 # In case of needing reduction, merge dry with shrubland
-
-# 1999_25j           2002_33           2012_57           2012_58
-# 0.01244363        0.03855622        0.08417732        0.03914146
-
-# 2015_40           2015_42 2021_2146405150_W          2021_865
-# 0.05576505        0.09326619        0.28873183        0.52477964
-
-# CoVentana
-# 0.00453907
-
-plot(lands[["1999_25j"]]$landscape_img[["veg"]])
-# Este es el smallest. Los otros son medio grandes como para hacer pruebitas
-
-fire_size_rel[veg_num == 4]
-# 1999_27j_N        1999_27j_S           1999_28           2002_36
-# 0.0159860951      0.1628276201      0.0092614464      0.0933731752
-# 2002_7           2004_23   2008_1379405717            2008_5
-# 0.0052959697      0.0052064508      0.1922772424      0.0972374906
-# 2009_2007583421           2009_26           2009_28           2011_18
-# 0.0858063770      0.0506278089      0.0116577566      0.0172049482
-# 2013_30            2014_1           2015_11           2015_46
-# 0.0017321633      0.0918380310      0.0063268591      0.0162512881
-# 2015_50           2015_53          2016_47j 2021_2146405150_E
-# 1.0000000000      0.0341996823      0.0421235210      0.2582066896
-# 2021_936 2022_2125136700_r
-# 0.0003867937      0.3371249039
-
-
-fire_size_rel[veg_num == 2]
-# 2005_9     2006_20E      2013_12      2013_32      2015_41     2021_911
-# 0.0004063275 0.0018928315 0.0003232768 0.0004305183 0.0017972326 0.0003874406
-# CoCampana
-# 0.0003076239

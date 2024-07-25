@@ -12,10 +12,9 @@ source(spread_dir)
 # constants ---------------------------------------------------------------
 
 n_veg <- 3 # vegetation types
-n_terrain <- 3 # it doesn't include steps
-n_b_terrain <- n_terrain - 1
-n_layers <- n_terrain + 1
-layer_names <- c("vegetation", "elev", "wdir", "wspeed")
+n_coef <- n_veg + 5 # it doesn't include steps
+n_layers <- n_coef - n_veg + 1
+layer_names <- c("vegetation", "ndvi", "north", "elev", "wdir", "wspeed")
 
 # landscape raster
 size <- 30
@@ -33,7 +32,9 @@ landscape <- rast(
 
 # fill data
 landscape$vegetation <- sample(0:(n_veg-1), n_rows * n_cols, replace = TRUE)
-landscape$elev <- rnorm(ncell(landscape), 1500, 300)
+landscape$ndvi <- rnorm(ncell(landscape))
+landscape$north <- runif(ncell(landscape))
+landscape$elev <- rnorm(ncell(landscape))
 landscape$wdir <- runif(ncell(landscape), 0, 2 * pi) # radians
 landscape$wspeed <- abs(rnorm(ncell(landscape), 0, 2))
 
@@ -44,8 +45,7 @@ predmat <- values(landscape) # first column is vegetation
 
 # start
 
-cv <- rnorm(n_veg, 0, 3)
-ct <- rnorm(n_b_terrain, 0, 3)
+coefs <- rnorm(n_coef, 0, 3)
 
 burning_cell <- sample(1:ncell(landscape), size = 1)
 neighs_raw <- adjacent(landscape, 1, "queen") %>% as.numeric
@@ -57,10 +57,9 @@ s <- round(runif(1, 100, 1000)) # define seed
 set.seed(s) # set seed to compare the random simulation for burning
 spread_result_r <- spread_one_cell_r(
   vegetation = predmat[neighs_id[1], 1, drop = T],
-  terrain_burning = predmat[burning_cell, -1, drop = T], # USE DROP!!
-  terrain_neighbour = predmat[neighs_id[1], -1, drop = T],
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape_burning = predmat[burning_cell, -1, drop = T], # USE DROP!!
+  landscape_neighbour = predmat[neighs_id[1], -1, drop = T],
+  coef = coefs,
   position = pos[1],
   upper_limit = 1
 )
@@ -69,20 +68,18 @@ spread_result_r
 set.seed(s)
 spread_result_cpp_burn <- spread_one_cell(
   vegetation = predmat[neighs_id[1], 1, drop = T],
-  terrain_burning = predmat[burning_cell, -1, drop = T], # USE DROP!!
-  terrain_neighbour = predmat[neighs_id[1], -1, drop = T],
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape_burning = predmat[burning_cell, -1, drop = T], # USE DROP!!
+  landscape_neighbour = predmat[neighs_id[1], -1, drop = T],
+  coef = coefs,
   position = pos[1] - 1,
   upper_limit = 1
 )
 
 spread_result_cpp_prob <- spread_one_cell_prob(
   vegetation = predmat[neighs_id[1], 1, drop = T],
-  terrain_burning = predmat[burning_cell, -1, drop = T], # USE DROP!!
-  terrain_neighbour = predmat[neighs_id[1], -1, drop = T],
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape_burning = predmat[burning_cell, -1, drop = T], # USE DROP!!
+  landscape_neighbour = predmat[neighs_id[1], -1, drop = T],
+  coef = coefs,
   position = pos[1] - 1,
   upper_limit = 1
 )
@@ -95,9 +92,8 @@ spread_result_r["probs"]; spread_result_cpp_prob
 # simulate_fire test ------------------------------------------------------
 
 # sample parameters
-cv <- rnorm(n_veg)
-ct <- rnorm(n_b_terrain, 0, 3)
-
+coefs <- rnorm(n_coef)
+coefs[1] <- 100
 # make ignition point(s)
 ig_cell <- sample(1:ncell(landscape), 1)
 ig_location <- rowColFromCell(landscape, ig_cell) %>% t
@@ -106,9 +102,8 @@ steps <- 2 # check this
 # set.seed(s)
 burn_result_r <- simulate_fire_deterministic_r(
   landscape = landscape, # SpatRaster
-  coef_veg = cv,
-  coef_terrain = ct,
   ignition_cells = ig_location,
+  coef = coefs,
   upper_limit = 1.0,
   steps,
   plot_animation = F
@@ -116,11 +111,10 @@ burn_result_r <- simulate_fire_deterministic_r(
 
 # set.seed(s)
 burn_result_cpp <- simulate_fire_deterministic(
+  landscape = land_cube(landscape)[, , -1], # without vegetation
   vegetation = land_cube(landscape)[, , 1],
-  terrain = land_cube(landscape)[, , -1], # without vegetation
-  coef_veg = cv,
-  coef_terrain = ct,
   ignition_cells = ig_location - 1,
+  coef = coefs,
   upper_limit = 1.0,
   steps
 )
@@ -148,33 +142,30 @@ values(landscape_base) <- 0
 #______________________________
 
 # wind test
-wind_dir <- 360               # direction, in angles, from which the wind comes
+wind_dir <- 90               # direction, in angles, from which the wind comes
 lands_sub <- landscape_base
 lands_sub$wdir <- rep(wind_dir * pi / 180, ncell(lands_sub))
 lands_sub$wspeed <- 8
-cv <- rep(-1, n_veg)
-ct <- rep(0, n_b_terrain)
-ct[b_wind] <- 0.5
+coefs <- c(-1, rep(0, n_coef - 1))
+coefs[b_wind] <- 0.5
 
 seed <- round(runif(1, 10, 1e6))
 
 set.seed(seed)
 rr <- simulate_fire_r(
   landscape = lands_sub,
-  coef_veg = cv,
-  coef_terrain = ct,
   ignition_cells = ig_location,
+  coef = coefs,
   upper_limit = 1.0,
   plot_animation = F
 )
 
 set.seed(seed)
 cc <- simulate_fire(
+  landscape = land_cube(lands_sub)[, , -1],
   vegetation = land_cube(lands_sub)[, , 1],
-  terrain = land_cube(lands_sub)[, , -1],
-  coef_veg = cv,
-  coef_terrain = ct,
   ignition_cells = ig_location - 1,
+  coef = coefs,
   upper_limit = 1.0
 )
 
@@ -183,36 +174,34 @@ plot(rast_from_mat(cc, lands_sub), col = c("green", "black"), main = "C++")
 plot(rast_from_mat(rr, lands_sub), col = c("green", "black"), main = "R")
 par(mfrow = c(1, 1))
 # the seed works!
+
 
 #______________________________
 
 # slope test
 lands_sub <- landscape_base
-lands_sub$elev <- rep(seq(800, 1500, length.out = nrow(lands_sub)),
+lands_sub$elev <- rep(seq(800, 900, length.out = nrow(lands_sub)),
                       each = ncol(lands_sub))
-cv <- rep(-5, n_veg)
-ct <- rep(0, n_b_terrain)
-ct[b_slope] <- -10
+coefs <- c(-1, rep(0, n_coef - 1))
+coefs[b_slope] <- -10
 
-seed <- round(runif(1, 10, 1e6))
+seed <- floor(runif(1, 10, 1e6))
 
 set.seed(seed)
 rr <- simulate_fire_r(
-  landscape = lands_sub,
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape = lands_sub, # use the SpatRaster
   ignition_cells = ig_location,
+  coef = coefs,
   upper_limit = 1.0,
   plot_animation = F
 )
 
 set.seed(seed)
 cc <- simulate_fire(
+  landscape = land_cube(lands_sub)[, , -1],
   vegetation = land_cube(lands_sub)[, , 1],
-  terrain = land_cube(lands_sub)[, , -1],
-  coef_veg = cv,
-  coef_terrain = ct,
   ignition_cells = ig_location - 1,
+  coef = coefs,
   upper_limit = 1.0
 )
 
@@ -220,38 +209,104 @@ par(mfrow = c(1, 2))
 plot(rast_from_mat(cc, lands_sub), col = c("green", "black"), main = "C++")
 plot(rast_from_mat(rr, lands_sub), col = c("green", "black"), main = "R")
 par(mfrow = c(1, 1))
-# the seed works!
+
+
+#______________________________
+
+# elevation test
+lands_sub <- landscape_base
+lands_sub$elev <- rep(seq(-3, 3, length.out = nrow(lands_sub)),
+                      each = ncol(lands_sub))
+coefs <- c(-2, rep(0, n_coef - 1))
+coefs[b_elev] <- 3
+
+seed <- floor(runif(1, 10, 1e6))
+
+set.seed(seed)
+rr <- simulate_fire_r(
+  landscape = lands_sub, # use the SpatRaster
+  ignition_cells = ig_location,
+  coef = coefs,
+  upper_limit = 1.0,
+  plot_animation = F
+)
+
+set.seed(seed)
+cc <- simulate_fire(
+  landscape = land_cube(lands_sub)[, , -1],
+  vegetation = land_cube(lands_sub)[, , 1],
+  ignition_cells = ig_location - 1,
+  coef = coefs,
+  upper_limit = 1.0
+)
+
+par(mfrow = c(1, 2))
+plot(rast_from_mat(cc, lands_sub), col = c("green", "black"), main = "C++")
+plot(rast_from_mat(rr, lands_sub), col = c("green", "black"), main = "R")
+par(mfrow = c(1, 1))
+
+#______________________________
+
+# ndvi test
+lands_sub <- landscape_base
+lands_sub$ndvi <- rep(seq(-1, 1, length.out = nrow(lands_sub)),
+                      each = ncol(lands_sub))
+coefs <- c(-1, rep(0, n_coef - 1))
+coefs[b_ndvi] <- runif(1, -4, -1)
+
+seed <- floor(runif(1, 10, 1e6))
+
+set.seed(seed)
+rr <- simulate_fire_r(
+  landscape = lands_sub, # use the SpatRaster
+  ignition_cells = ig_location,
+  coef = coefs,
+  upper_limit = 1.0,
+  plot_animation = F
+)
+
+set.seed(seed)
+cc <- simulate_fire(
+  landscape = land_cube(lands_sub)[, , -1],
+  vegetation = land_cube(lands_sub)[, , 1],
+  ignition_cells = ig_location - 1,
+  coef = coefs,
+  upper_limit = 1.0
+)
+
+par(mfrow = c(1, 2))
+plot(rast_from_mat(cc, lands_sub), col = c("green", "black"), main = "C++")
+plot(rast_from_mat(rr, lands_sub), col = c("green", "black"), main = "R")
+par(mfrow = c(1, 1))
 
 
 #______________________________
 
 # vegetation test
 lands_sub <- landscape_base
-lands_sub$vegetation <- sample(c(0:(n_veg -1), 99), size = ncell(lands_sub),
+lands_sub$vegetation <- sample(c(0, 1, 2, 99), size = ncell(lands_sub),
                                prob = c(1, 1, 1, 2), replace = TRUE)
 
-cv <- rep(30, n_veg)
-ct <- rep(0, n_b_terrain)
+coefs <- rep(0, n_coef)
+coefs[1:n_veg] <- 30
 
 seed <- floor(runif(1, 10, 1e6))
 
 set.seed(seed)
 rr <- simulate_fire_r(
-  landscape = lands_sub,
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape = lands_sub, # use the SpatRaster
   ignition_cells = ig_location,
+  coef = coefs,
   upper_limit = 1.0,
   plot_animation = F
 )
 
 set.seed(seed)
 cc <- simulate_fire(
+  landscape = land_cube(lands_sub)[, , -1],
   vegetation = land_cube(lands_sub)[, , 1],
-  terrain = land_cube(lands_sub)[, , -1],
-  coef_veg = cv,
-  coef_terrain = ct,
   ignition_cells = ig_location - 1,
+  coef = coefs,
   upper_limit = 1.0
 )
 
@@ -266,18 +321,17 @@ par(mfrow = c(1, 1))
 
 # steps test
 lands_sub <- landscape_base
-cv <- rep(1000, n_veg)
-ct <- rep(0, n_b_terrain)
-steps <- sample(1:(nrow(lands_sub) / 2), size = 1)
-steps <- 0
+coefs <- rep(0, n_coef)
+coefs[1:n_veg] <- 1000
+steps <- sample(1:nrow(lands_sub), size = 1)
+# steps <- 0
 seed <- floor(runif(1, 10, 1e6))
 
 set.seed(seed)
 rr <- simulate_fire_r(
-  landscape = lands_sub,
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape = lands_sub, # use the SpatRaster
   ignition_cells = ig_location,
+  coef = coefs,
   upper_limit = 1.0,
   steps,
   plot_animation = F
@@ -285,11 +339,10 @@ rr <- simulate_fire_r(
 
 set.seed(seed)
 cc <- simulate_fire(
+  landscape = land_cube(lands_sub)[, , -1],
   vegetation = land_cube(lands_sub)[, , 1],
-  terrain = land_cube(lands_sub)[, , -1],
-  coef_veg = cv,
-  coef_terrain = ct,
   ignition_cells = ig_location - 1,
+  coef = coefs,
   upper_limit = 1.0,
   steps
 )
@@ -304,27 +357,24 @@ par(mfrow = c(1, 1))
 ## extra
 
 simulate_fire_r(
-  landscape = lands_sub,
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape = lands_sub, # use the SpatRaster
   ignition_cells = ig_location,
+  coef = coefs,
   upper_limit = 1.0,
-  steps,
-  plot_animation = F
+  steps = 0,
+  plot_animation = T
 )
 
 # check steps used
 cc_used <- simulate_fire_compare(
+  landscape = land_cube(lands_sub)[, , -1],
   vegetation = land_cube(lands_sub)[, , 1],
-  terrain = land_cube(lands_sub)[, , -1],
-  coef_veg = cv,
-  coef_terrain = ct,
   ignition_cells = ig_location - 1,
+  coef = coefs,
   upper_limit = 1.0,
   steps
 )
 cc_used$steps_used # Ok, in 17 steps burns everything.
-
 
 # Notes on spread simulation ----------------------------------------------
 
@@ -335,41 +385,41 @@ cc_used$steps_used # Ok, in 17 steps burns everything.
 # Similarity functions checks ---------------------------------------------
 
 
-lands_sub$vegetation <- sample(c(0:(n_veg -1), 99), size = ncell(lands_sub),
-                               prob = c(1, 1, 1, 2), replace = TRUE)
+landscape$vegetation <- sample(c(0, 1, 2, 99), n_rows * n_cols, replace = TRUE)
 
-cv <- rep(-1.5, n_veg)
-ct <- rnorm(n_b_terrain)
+# reasonable coefs
+coefs <- rnorm(n_coef)
+coefs[1:n_veg] <- -1.5
 
 # simulate fires
 set.seed(1)
 fire_1 <- simulate_fire_compare_veg(
-  vegetation = land_cube(lands_sub)[, , 1],
-  terrain = land_cube(lands_sub)[, , -1],
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape = land_cube(landscape)[, , -1], # use the array
+  vegetation = land_cube(landscape)[, , 1],
   ignition_cells = ig_location - 1,
-  upper_limit = 1.0
+  coef = coefs,
+  upper_limit = 1.0,
+  n_veg_types = n_veg
 )
 
 set.seed(1)
 fire_1_ <- simulate_fire_compare_veg(
-  vegetation = land_cube(lands_sub)[, , 1],
-  terrain = land_cube(lands_sub)[, , -1],
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape = land_cube(landscape)[, , -1], # use the array
+  vegetation = land_cube(landscape)[, , 1],
   ignition_cells = ig_location - 1,
-  upper_limit = 1.0
+  coef = coefs,
+  upper_limit = 1.0,
+  n_veg_types = n_veg
 )
 
 set.seed(2)
 fire_2 <- simulate_fire_compare_veg(
-  vegetation = land_cube(lands_sub)[, , 1],
-  terrain = land_cube(lands_sub)[, , -1],
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape = land_cube(landscape)[, , -1], # use the array
+  vegetation = land_cube(landscape)[, , 1],
   ignition_cells = ig_location - 1,
-  upper_limit = 1.0
+  coef = coefs,
+  upper_limit = 1.0,
+  n_veg_types = n_veg
 )
 
 # a fire against itself, simulated with the same seed
@@ -397,25 +447,23 @@ overlap_spatial_r(fire_1, fire_1)
 # Overlap plots -----------------------------------------------------------
 
 # reasonable coefs
-cv <- rnorm(n_veg, -1)
-ct <- rnorm(n_b_terrain)
+coefs <- rnorm(n_coef)
+coefs[1:n_veg] <- -1
 
 # simulate fires
 fire_1 <- simulate_fire_compare(
-  vegetation = land_cube(lands_sub)[, , 1],
-  terrain = land_cube(lands_sub)[, , -1],
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape = land_cube(landscape)[, , -1], # use the array
+  vegetation = land_cube(landscape)[, , 1],
   ignition_cells = ig_location - 1,
+  coef = coefs,
   upper_limit = 1.0
 )
 
 fire_2 <- simulate_fire_compare(
-  vegetation = land_cube(lands_sub)[, , 1],
-  terrain = land_cube(lands_sub)[, , -1],
-  coef_veg = cv,
-  coef_terrain = ct,
+  landscape = land_cube(landscape)[, , -1], # use the array
+  vegetation = land_cube(landscape)[, , 1],
   ignition_cells = ig_location - 1,
+  coef = coefs,
   upper_limit = 1.0
 )
 
