@@ -42,11 +42,11 @@ library(bayesplot)     # visualize posteriors
 library(foreach)       # parallelization
 library(doMC)          # doRNG had problems with cpp functions
 
-library(FireSpreadFI)  # spread and similarity functions
+library(FireSpread)    # spread and similarity functions
 
 library(microbenchmark)
 
-source(file.path("..", "FireSpreadFI", "tests", "testthat", "R_spread_functions.R"))
+source(file.path("..", "FireSpread", "tests", "testthat", "R_spread_functions.R"))
 # for rast_from_mat and a few constants
 
 # source("estimation_functions.R") # prior_dist and other stuff
@@ -89,7 +89,7 @@ params_upper["slope"] <- ext_beta / slope_sd
 
 gam_formula <- formula(
   y ~
-    
+
     # marginal effects
     s(intercept, bs = basis, k = k_side, fx = fixed) +
     s(vfi, bs = basis, k = k_side, fx = fixed) +
@@ -97,26 +97,26 @@ gam_formula <- formula(
     s(slope, bs = basis, k = k_side, fx = fixed) +
     s(wind, bs = basis, k = k_side, fx = fixed) +
     s(steps, bs = basis, k = k_side, fx = fixed) +
-    
+
     # interactions
     ti(intercept, vfi, k = k_int, bs = basis, fx = fixed) +
     ti(intercept, tfi, k = k_int, bs = basis, fx = fixed) +
     ti(intercept, slope, k = k_int, bs = basis, fx = fixed) +
     ti(intercept, wind, k = k_int, bs = basis, fx = fixed) +
     ti(intercept, steps, k = k_int, bs = basis, fx = fixed) +
-    
+
     ti(vfi, tfi, k = k_int, bs = basis, fx = fixed) +
     ti(vfi, slope, k = k_int, bs = basis, fx = fixed) +
     ti(vfi, wind, k = k_int, bs = basis, fx = fixed) +
     ti(vfi, steps, k = k_int, bs = basis, fx = fixed) +
-    
+
     ti(tfi, slope, k = k_int, bs = basis, fx = fixed) +
     ti(tfi, wind, k = k_int, bs = basis, fx = fixed) +
     ti(tfi, steps, k = k_int, bs = basis, fx = fixed) +
-    
+
     ti(slope, wind, k = k_int, bs = basis, fx = fixed) +
     ti(slope, steps, k = k_int, bs = basis, fx = fixed) +
-    
+
     ti(wind, steps, k = k_int, bs = basis, fx = fixed)
 )
 
@@ -195,11 +195,11 @@ kernel_expquad <- function(overlap, sizediff, scale = kscale) {
   return(exp(-lp))
 }
 
-# Similar as above, but scaling the overlap to max = 1, so 
+# Similar as above, but scaling the overlap to max = 1, so
 # a similar kernel is used in all fires.
-kernel_expquad2 <- function(metrics, overlap_max, 
+kernel_expquad2 <- function(metrics, overlap_max,
                             ov_scale = 0.05, diff_scale = 0.1, log = F) {
-  
+
   if(is.null(dim(metrics))) {
     metrics <- matrix(metrics, nrow = 1)
   }
@@ -207,31 +207,31 @@ kernel_expquad2 <- function(metrics, overlap_max,
   # overlap <- runif(1)
   # sizediff <- matrix(runif(1 * 5), 1, 5)
   # ov_scale = 0.05; diff_scale = 0.1; overlap_max = 1; log = F
-  # ## 
-  
+  # ##
+
   # Scale overlap to have maximum = 1
-  ov_unit <- metrics[1] / overlap_max 
+  ov_unit <- metrics[1] / overlap_max
   ov_unit[ov_unit > 1] <- 1
   ov_dist <- 1 - ov_unit
   metrics[1] <- ov_dist
-  
+
   Sigma <- diag(c(ov_scale, rep(diff_scale, ncol(metrics)-1)) ^ 2)
-  out <- dmvnorm(metrics, rep(0, ncol(metrics)), Sigma, 
+  out <- dmvnorm(metrics, rep(0, ncol(metrics)), Sigma,
                  log = log, checkSymmetry = F)
-  
+
   return(out)
 }
 
-kernel_expquad3 <- function(overlap, overlap_max, 
+kernel_expquad3 <- function(overlap, overlap_max,
                             ov_scale = 0.05, log = F) {
-  
+
   # Scale overlap to have maximum = 1
-  ov_unit <- overlap / overlap_max 
+  ov_unit <- overlap / overlap_max
   ov_unit[ov_unit > 1] <- 1
   ov_dist <- 1 - ov_unit
 
   out <- dnorm(ov_dist, sd = ov_scale, log = log)
-  
+
   return(out)
 }
 
@@ -246,21 +246,21 @@ kernel_expquad3 <- function(overlap, overlap_max,
 # The last two are used to rule out bounded fires.
 similarity_simulate_particle <- function(particle, fire_data = NULL,
                                          n_sim = n_rep) {
-  
+
   ## testo
   # particle <- particles_sim(N = 1)
   ## end testo
-  
+
   ov <- numeric(n_sim)
   sdiff <- matrix(NA, n_sim, n_veg)
-  
+
   # terrain coefficients
   ct <- particle[(n_nd+1):(n_coef-1)]
-  
+
   # non-directional effects (intercepf + fis)
   coef_nd <- particle[1:n_nd]
   nd_layer <- make_nd_layer(fire_data$landscape[, , c("vfi", "tfi")], coef_nd)
-  
+
   # simulate and compute metrics
   for(i in 1:n_sim) { # simulated fires by particle
     fire_sim <- simulate_fire_compare_veg(
@@ -273,20 +273,20 @@ similarity_simulate_particle <- function(particle, fire_data = NULL,
       steps = particle[n_coef],
       n_veg = n_veg
     )
-    
+
     ov[i] <- overlap_spatial(
       fire_sim[c("burned_layer", "burned_ids")],
       fire_data[c("burned_layer", "burned_ids")]
     )
-    
+
     sdiff[i, ] <- compare_size_veg(fire_data$counts_veg,
                                    fire_sim$counts_veg)
-    
+
   }
-  
+
   out <- cbind(ov, sdiff)
   colnames(out) <- c("ov", paste("sdiff", 1:n_veg, sep = ""))
-  
+
   return(out)
 }
 
@@ -294,18 +294,18 @@ similarity_simulate_particle <- function(particle, fire_data = NULL,
 # It returns a data.frame with averages.
 similarity_simulate_particle_metrics <- function(particle, fire_data = NULL,
                                                  n_sim = n_rep) {
-  
+
   metrics <- matrix(NA, n_sim, 3)
   colnames(metrics) <- c("overlap", "size_diff", "steps_used")
-  
+
   # terrain coefficients
   ct <- particle[(n_nd+1):(n_coef-1)]
-  
+
   # non-directional effects (intercepf + fis)
   coef_nd <- particle[1:n_nd]
   nd_layer <- make_nd_layer(fire_data$landscape[, , c("vfi", "tfi")], coef_nd)
-  
-  
+
+
   # simulate and compute metrics
   for(i in 1:n_sim) { # simulated fires by particle
     fire_sim <- simulate_fire_compare(
@@ -317,17 +317,17 @@ similarity_simulate_particle_metrics <- function(particle, fire_data = NULL,
       upper_limit = upper_limit,
       steps = particle[n_coef]
     )
-    
+
     metrics[i, "overlap"] <- overlap_spatial(
       fire_sim, fire_data[c("burned_layer", "burned_ids")]
     )
-    
+
     metrics[i, "size_diff"] <- ncol(fire_sim$burned_ids) -
       ncol(fire_data$burned_ids)
-    
+
     metrics[i, "steps_used"] <- fire_sim$steps_used
   }
-  
+
   mo <- mean(metrics[, "overlap"])
   # extract values
   ll_summ <- c(
@@ -340,7 +340,7 @@ similarity_simulate_particle_metrics <- function(particle, fire_data = NULL,
     size_diff = mean(metrics[, "size_diff"]),
     steps_used = mean(metrics[, "steps_used"])
   )
-  
+
   return(ll_summ)
 }
 
@@ -350,34 +350,34 @@ similarity_simulate_particle_metrics <- function(particle, fire_data = NULL,
 similarity_simulate_parallel <- function(particles_mat = NULL,
                                          fire_data = NULL,
                                          n_sim = n_rep) {
-  
+
   # ### test:
   # particles_mat <- particles[waves_1 == w, ]
   # fire_data <- spread_data
   # n_sim <- 20
   # ###
-  
+
   # turn particle matrix into list for parallel evaluation
   particles_list <- lapply(1:nrow(particles_mat),
                            function(x) particles_mat[x, ])
-  
+
   # simulate in parallel
   result <- foreach(pp = particles_list) %dopar% {
     similarity_simulate_particle(pp, fire_data, n_sim)
   }
-  
+
   # rbind list result
   metrics_arr <- abind::abind(result, along = 3)
-  
+
   # for each particle, get the average abc_prob, computed before averaging
   # replicates
   abc_prob_mat <- apply(metrics_arr, c(1, 3), function(x) {
     kernel_expquad(x[1], x[2:(n_veg+1)], scale = kscale)
   })
   abc_prob_summ <- colMeans(abc_prob_mat)
-  
+
   metrics_summ <- apply(metrics_arr, 3, colMeans) |> t()
-  
+
   # return data.frame
   res <- data.frame(
     wave = NA,
@@ -390,57 +390,57 @@ similarity_simulate_parallel <- function(particles_mat = NULL,
 
 # get_bounds: computes the metrics for the largest and smallest fires possible
 get_bounds <- function(fire_data, n_sim = 1) {
-  
+
   coef_burn_all <- c(1e6, rep(0, n_coef - 1))
   coef_burn_none <- c(-1e6, rep(0, n_coef - 2), 1)
-  
+
   small_fire <- similarity_simulate_particle_metrics(coef_burn_none,
                                                      fire_data = fire_data,
                                                      n_sim = n_sim)
-  
+
   large_fire <- similarity_simulate_particle_metrics(coef_burn_all,
                                                      fire_data = fire_data,
                                                      n_sim = n_sim)
-  
+
   sim_bounds <- rbind(small_fire, large_fire)
   rownames(sim_bounds) <- c("smallest", "largest")
-  
+
   return(sim_bounds)
 }
 
 wave_plot <- function(data, response = "abc_prob", alpha = 0.3, best = NULL,
                       x = "par_values", thres = NULL, bin = FALSE,
                       tit = NULL, rc = c(2, 3)) {
-  
+
   if(!is.null(best)) {
     data <- data[order(data[, response], decreasing = TRUE), ]
   }
-  
+
   if(bin) {
     data$bin <- jitter(as.numeric(data$abc_prob >= thres), factor = 0.2)
     response <- "bin"
   }
-  
+
   yy <- range(data[, response])
   yy[2] <- yy[2] * 1.05
-  
+
   # title for first plot
   if(is.null(tit)) {
     tit <- deparse(substitute(data))
   }
-  
+
   par(mfrow = c(rc[1], rc[2]))
   for(i in 1:n_coef) {
     mm <- ifelse(i == 1, tit, NA)
     plot(data[, response] ~ data[, x][, i], ylab = response,
          xlab = par_names[i], ylim = yy, main = mm,
          pch = 19, col = rgb(0, 0, 0, alpha))
-    
+
     if(!is.null(best)) {
       points(data[1:best, response] ~ data[, x][1:best, i],
              pch = 19, col = rgb(0, 0, 1, alpha))
     }
-    
+
     if(!is.null(thres) & response == "abc_prob") {
       abline(h = thres, col = "red")
     }
@@ -450,7 +450,7 @@ wave_plot <- function(data, response = "abc_prob", alpha = 0.3, best = NULL,
 
 wave_plot_pairs <- function(data, alpha = 0.05, thres, support = NULL,
                             tit = NA, rc = c(3, 5)) {
-  
+
   ## TEST
   # data = wlist$like_sim
   # thres = wlist$thres
@@ -458,39 +458,39 @@ wave_plot_pairs <- function(data, alpha = 0.05, thres, support = NULL,
   # tit = "1999_2140469994_r"
   # rc = c(3, 5)
   ##
-  
+
   if(is.null(support)) {
     ranges <- apply(data$par_values, 2, range)
   } else {
     ranges <- support
   }
-  
+
   xvars <- list(
     rep("slope", n_veg),
     rep("wind", n_veg),
     c("wind", "steps", "steps")
   )
-  
+
   yvars <- list(
     veg_names,
     veg_names,
     c("slope", "slope", "wind")
   )
-  
+
   dd <- data$par_values[data$abc_prob >= thres, ]
-  
+
   n_cols <- sapply(yvars, length)
-  
+
   par(mfrow = c(rc[1], rc[2]))
   for(r in 1:3) {
     for(c in 1:n_cols[r]) {
       # r = 1; c = 1
-      
+
       tit <- ifelse(r == 1 & c == 1, tit, NA)
-      
+
       yname <- yvars[[r]][c]
       xname <- xvars[[r]][c]
-      
+
       plot(dd[, yname] ~ dd[, xname], xlab = xname, ylab = yname,
            xlim = ranges[, xname], ylim = ranges[, yname],
            pch = 19, col = rgb(0, 0, 0, alpha),
@@ -503,39 +503,39 @@ wave_plot_pairs <- function(data, alpha = 0.05, thres, support = NULL,
 # The same, to be used only with particles (matrix)
 wave_plot_pairs2 <- function(x, alpha = 0.05, support = NULL,
                              tit = NA, rc = c(3, 5)) {
-  
+
   if(is.null(support)) {
     ranges <- apply(x, 2, range)
   } else {
     ranges <- support
   }
-  
+
   xvars <- list(
     rep("slope", n_veg),
     rep("wind", n_veg),
     c("wind", "steps", "steps")
   )
-  
+
   yvars <- list(
     veg_names,
     veg_names,
     c("slope", "slope", "wind")
   )
-  
+
   dd <- x
-  
+
   n_cols <- sapply(yvars, length)
-  
+
   par(mfrow = c(rc[1], rc[2]))
   for(r in 1:3) {
     for(c in 1:n_cols[r]) {
       # r = 1; c = 1
-      
+
       tit <- ifelse(r == 1 & c == 1, tit, NA)
-      
+
       yname <- yvars[[r]][c]
       xname <- xvars[[r]][c]
-      
+
       plot(dd[, yname] ~ dd[, xname], xlab = xname, ylab = yname,
            xlim = ranges[, xname], ylim = ranges[, yname],
            pch = 19, col = rgb(0, 0, 0, alpha),
@@ -558,9 +558,9 @@ rmvn_sobol <- function(n, mu, Sigma, sobol = F){
   if(is.null(dim(mu))) {
     mu <- matrix(mu, nrow = 1)
   }
-  
+
   p <- ncol(mu)
-  
+
   if(sobol) {
     if(nrow(mu) > 1) stop("Sobol sequence not recommended with more than one center.")
     P <- sobol(n, p, init = F)
@@ -568,10 +568,10 @@ rmvn_sobol <- function(n, mu, Sigma, sobol = F){
   } else {
     Z <- matrix(rnorm(p*n), p, n)
   }
-  
+
   L <- t(chol(Sigma)) # By default R's chol function returns upper cholesky factor
   X <- L %*% Z
-  
+
   if(nrow(mu) == 1) { # global centre
     mu <- as.numeric(mu)
     X <- sweep(X, 1, mu, FUN = `+`)
@@ -602,19 +602,19 @@ make_positive_definite <- function(m, corr = FALSE, max_iter = 1e4) {
   if(anyNA(m) | !all(is.finite(m))) {
     return(NA)
   }
-  
+
   if(is_positive_definite(m)) {
     return(m)
   } else {
     temp <- tryNULL(nearPD(m, corr = corr, keepDiag = TRUE, maxit = max_iter))
     if(is.null(temp)) return(NA) else {
       mat <- as.matrix(temp$mat)
-      
+
       # check NA or inf before definiteness
       if(anyNA(mat) | !all(is.finite(mat))) {
         return(NA)
       }
-      
+
       if(!is_positive_definite(mat)) {
         return(NA)
       } else return(mat)
@@ -700,14 +700,14 @@ scale_params <- function(x, support) {
 # unconstrained one, using scaled logit and log (for steps)
 unconstrain <- function(x, support) {
   xun <- x
-  
+
   names_logit <- colnames(support)[colnames(support) != "steps"]
   for(j in names_logit) {
     xun[, j] <- qlogis((x[, j] - support[1, j]) / (support[2, j] - support[1, j]))
   }
-  
+
   xun[, "steps"] <- log(x[, "steps", drop = F])
-  
+
   return(xun)
 }
 
@@ -722,21 +722,21 @@ unconstrain2 <- function(x, support) {
 
 unconstrain_vec <- function(x, support) {
   xun <- x
-  
+
   llgg <- colnames(support) != "steps"
   xun[llgg] <- qlogis(
-    (x[llgg] - support[1, llgg]) / 
+    (x[llgg] - support[1, llgg]) /
       (support[2, llgg] - support[1, llgg])
   )
   xun[!llgg] <- log(x[!llgg])
-  
+
   return(xun)
 }
 
 unconstrain2_vec <- function(x, support) {
   xun <- x
   xun <- qlogis(
-    (x - support[1, ]) / 
+    (x - support[1, ]) /
     (support[2, ] - support[1, ])
   )
   return(xun)
@@ -745,14 +745,14 @@ unconstrain2_vec <- function(x, support) {
 # The inverse of unconstrain
 constrain <- function(xun, support) {
   xc <- xun
-  
+
   names_logit <- colnames(support)[colnames(support) != "steps"]
   for(j in names_logit) {
     xc[, j] <- plogis(xun[, j]) * (support[2, j] - support[1, j]) + support[1, j]
   }
-  
+
   xc[, "steps"] <- exp(xun[, "steps", drop = F])
-  
+
   return(xc)
 }
 
@@ -767,12 +767,12 @@ constrain2 <- function(xun, support) {
 
 constrain_vec <- function(xun, support) {
   xc <- xun
-  
+
   llgg <- colnames(support) != "steps" # logit positions
   xc[llgg] <- plogis(xun[llgg]) * (support[2, llgg] - support[1, llgg]) + support[1, llgg]
-  
+
   xc[!llgg] <- exp(xun[!llgg])
-  
+
   return(xc)
 }
 
@@ -809,20 +809,20 @@ explore_likelihood <- function(data, n = 600, var_factor = 1, n_best = "all",
                                support, spread_data,
                                centre = "local", sobol = TRUE,
                                phase = NULL) {
-  
+
   ### Testo
   # data = wave1; n = 500; p_best = 0.15; prob_fn = NULL;
   # support = sup; spread_data = spread_data;
   # centre = "global"; sobol = TRUE;
   # pow = 1; var_factor = 1; accept_thres = NULL
   ### endo testo
-  
+
   # if threshold is used, ignore p_best
   if(!is.null(accept_thres)) {
     p_best <- NULL
     n_best <- sum(data$abc_prob >= accept_thres)
   }
-  
+
   # which particles will be resampled?
   if(!is.null(p_best)) {
     n_best <- round(nrow(data) * p_best)
@@ -835,10 +835,10 @@ explore_likelihood <- function(data, n = 600, var_factor = 1, n_best = "all",
   } else {
     data <- data[order(data$abc_prob, decreasing = TRUE), ]
   }
-  
+
   # resample the best particles
   weight <- data$abc_prob
-  
+
   # sometimes the best particles are too few, and the computation of the vcov
   # fails. In these cases we need to smooth a bit the weights, so more than 20
   # different particles are resampled.
@@ -852,26 +852,26 @@ explore_likelihood <- function(data, n = 600, var_factor = 1, n_best = "all",
     k <- k + 0.5
     j <- j + 1
   }
-  
+
   if(j == 100) {
     dexp <- data[1:n_best, ]
   } else {
     dexp <- data[ids_rep, ]
   }
-  
+
   # transform to unconstrained scale
   dexp$par_values_raw <- logit_scaled(dexp$par_values, support)
-  
+
   # MVN kernel
   # first, remove infinite values and redefine n
   finite <- apply(dexp$par_values_raw, 1, function(x) all(is.finite(x))) %>% t
   dexp <- dexp[finite, ]
   n <- nrow(dexp)
-  
+
   V <- make_positive_definite(cov(dexp$par_values_raw))
   if(anyNA(V)) V <- diag(apply(dexp$par_values_raw, 2, var))
   Vlarge <- V * var_factor
-  
+
   if(centre == "local") {
     mus <- dexp$par_values_raw # centred at good particles
     sobol <- FALSE
@@ -879,28 +879,28 @@ explore_likelihood <- function(data, n = 600, var_factor = 1, n_best = "all",
   if(centre == "global") {
     mus <- apply(dexp$par_values_raw, 2, mean) # centred at global mean
   }
-  
+
   candidates_raw <- rmvn_sobol(n, mus, Vlarge, sobol) %>% t
   # transform to original scale
   colnames(candidates_raw) <- par_names
   candidates <- invlogit_scaled(candidates_raw, support)
   colnames(candidates) <- par_names
-  
+
   # message("Simulating fires")
   sim_result <- similarity_simulate_parallel(particles_mat = candidates,
                                              fire_data = spread_data)
-  
+
   # define wave
   sim_result$wave <- max(data$wave) + 1
   sim_result$phase <- phase
   colnames(sim_result$par_values) <- par_names
-  
+
   # merge old and new datasets
   res <- rbind(
     data[, colnames(sim_result)],
     sim_result
   )
-  
+
   return(res)
 }
 
@@ -914,23 +914,23 @@ explore_likelihood_iterate <- function(
     phase = NULL,
     write = FALSE, fire_name = NULL
 ) {
-  
+
   last_wave <- max(data$wave)
   m <- paste("Search starts at max abc_prob = ",
              round(max(data$abc_prob), 4), sep = "")
   message(m)
-  
+
   # initialize res as previous data
   res <- data
-  
+
   # create var_factor sequence for the variable case
   var_factors <- rep(var_factor, ceiling(n_waves / length(var_factor)))
-  
+
   # # create centre sequence for the variable case
   # each <- ceiling(length(var_factor) / 2) # var_factors are for each centre
   # centres_dup <- rep(centre, each = each)
   # centres <- rep(centres_dup, ceiling(n_waves / length(var_factor)))
-  
+
   for(i in 1:n_waves) {
     res <- explore_likelihood(data = res, n = n, var_factor = var_factors[i],
                               n_best = n_best, p_best = p_best,
@@ -938,19 +938,19 @@ explore_likelihood_iterate <- function(
                               support = support, spread_data = spread_data,
                               centre = centre, sobol = sobol,
                               phase = phase)
-    
+
     m <- paste("Search wave ", last_wave + i, "; max abc_prob = ",
                round(max(res$abc_prob), 4), sep = "")
-    
+
     if(write) {
       nn <- paste(fire_name, "-wave-", last_wave + i, ".rds", sep = "")
       saveRDS(res[res$wave == last_wave + i, ], file.path(target_dir, nn))
       # save only latest
     }
-    
+
     message(m)
   }
-  
+
   return(res)
 }
 
@@ -958,14 +958,14 @@ explore_likelihood_iterate <- function(
 # for adaptMCMC::MCMC, because MCMC.parallel does not allow to fix the inits.
 MCMC_parallel <- function(fun, n, adapt, scale, init_list, acc.rate = 0.234,
                           n_chains, n_cores, ...) {
-  
+
   registerDoMC(n_cores)
-  
+
   runs <- foreach(pp = init_list) %dopar% {
     MCMC(p = fun, n = n, adapt = adapt, scale = scale, init = pp,
          acc.rate = acc.rate, ...)
   }
-  
+
   return(runs)
 }
 
@@ -982,22 +982,22 @@ drop_uncertain <- function(unc, p, centre = 0.7, slope = -90) {
 #   if higher, the particle is rejected.
 rejection_sample <- function(iter, model, support,
                              centre = 0.7, slope = -90) {
-  
+
   ntry <- iter * 10
   got <- 0
   wave <- 0
   samples <- matrix(NA, ntry, n_coef)
   colnames(samples) <- par_names
-  
+
   while(got < iter) {
     unif_draws <- matrix(runif(ntry * n_coef), ntry, n_coef)
     particles <- scale_params(unif_draws, support)
     colnames(particles) <- par_names
     part_df <- as.data.frame(particles)
-    
+
     # compute probability
     prob <- predict(model, part_df, type = "response")
-    
+
     # only evaluate uncertainty at particles with high probability.
     # (This step is time consuming)
     unc <- numeric(length(prob))
@@ -1008,21 +1008,21 @@ rejection_sample <- function(iter, model, support,
       uuu <- plogis(pp$fit + qnorm(0.975) * pp$se.fit)
       unc[high_prob_ids] <- uuu - lll
     }
-    
+
     # drop probability if highly uncertain
     prob2 <- drop_uncertain(unc, prob, centre, slope)
     stay <- which(runif(ntry) <= prob2)
-    
+
     l <- length(stay)
     if(l > 0) {
       samples[(got+1):(got+l), ] <- particles[stay, ]
     }
-    
+
     wave <- wave + 1
     got <- got + l
     # print(paste("wave ", wave, ", got ", got, sep = ""))
   }
-  
+
   samples <- samples[1:iter, ]
   return(samples)
 }
@@ -1040,33 +1040,33 @@ rejection_sample_parallel <- function(iter, model, support,
 
 # sample from a region where the density is higher than a threshold
 rejection_sample_region <- function(iter, kde_model, support, ll_thres) {
-  
+
   ntry <- iter * 10
   got <- 0
   wave <- 0
   samples <- matrix(NA, ntry, n_coef)
   colnames(samples) <- par_names
-  
+
   while(got < iter) {
     unif_draws <- matrix(runif(ntry * n_coef), ntry, n_coef)
     particles <- scale_params(unif_draws, support)
     colnames(particles) <- par_names
-    
+
     # compute probability
     dens <- dkdevine(particles, kde_model)
     log_dens <- log(dens)
-    
+
     high_prob_ids <- which(log_dens > ll_thres)
     l <- length(high_prob_ids)
     if(l > 0) {
       samples[(got+1):(got+l), ] <- particles[high_prob_ids, ]
     }
-    
+
     wave <- wave + 1
     got <- got + l
     print(paste("wave ", wave, ", got ", got, sep = ""))
   }
-  
+
   samples <- samples[1:iter, ]
   return(samples)
 }
@@ -1093,7 +1093,7 @@ tidy_samples <- function(samples, adapt, support) {
   }
   arr <- aperm(arr0, c(1, 3, 2))
   draws_arr <- as_draws_array(arr)
-  
+
   draws_arr2 <- rename_variables(draws_arr,
                                  "forest" = "...1",
                                  "shrubland" = "...2",
@@ -1104,7 +1104,7 @@ tidy_samples <- function(samples, adapt, support) {
                                  "slope" = "...7",
                                  "wind" = "...8",
                                  "steps" = "...9")
-  
+
   return(draws_arr2)
 }
 
@@ -1120,7 +1120,7 @@ tidy_samples_ind <- function(samples_list) {
   }
   arr <- aperm(arr0, c(1, 3, 2))
   draws_arr <- as_draws_array(arr)
-  
+
   draws_arr2 <- rename_variables(draws_arr,
                                  "forest" = "...1",
                                  "shrubland" = "...2",
@@ -1131,7 +1131,7 @@ tidy_samples_ind <- function(samples_list) {
                                  "slope" = "...7",
                                  "wind" = "...8",
                                  "steps" = "...9")
-  
+
   return(draws_arr2)
 }
 
@@ -1163,16 +1163,16 @@ fn_like_sim_binom <- function(x, support = NULL, fire_data = NULL, thres = NULL)
 reduce_support <- function(x, support, prop = 0.75) {
   ranges <- apply(x, 2, range)
   widths <- apply(ranges, 2, diff)
-  
+
   rnew <- ranges
-  
+
   rnew[1, ] <- ranges[1, ] - widths * prop
   rnew[2, ] <- ranges[2, ] + widths * prop
-  
+
   # constrain to the original support
   rnew[1, ] <- ifelse(rnew[1, ] < support[1, ], support[1, ], rnew[1, ])
   rnew[2, ] <- ifelse(rnew[2, ] > support[2, ], support[2, ], rnew[2, ])
-  
+
   return(rnew)
 }
 
@@ -1182,7 +1182,7 @@ within_support <- function(x, support) {
   ## test
   # x <- wlist$like_sim$par_values
   # support <- support_reduced
-  
+
   keep_mat <- matrix(NA, nrow(x), ncol(x))
   for(i in 1:ncol(x)) {
     keep_mat[, i] <- x[, i] >= support[1, i] & x[, i] <= support[2, i]
@@ -1223,14 +1223,14 @@ within_support <- function(x, support) {
 # on them.
 abc_gam <- function(gam, support_sampling, threshold, spread_data,
                     n = 600, n_cores_gam = 15, n_cores_fire = 15) {
-  
+
   ## TESTO
   # gam = wlist$gam_bern; support_sampling =  support_sample
   # threshold = wlist$thres; spread_data = spread_data
   # n = 600; n_cores_gam = 15; n_cores_fire = n_cores_fire
   ## ENDO TESTO
   n_batch <- ceiling(n / n_cores_gam)
-  
+
   # Simulate particles from the GAM
   samples_try <- rejection_sample_parallel(
     iter = n_batch, model = gam,
@@ -1238,17 +1238,17 @@ abc_gam <- function(gam, support_sampling, threshold, spread_data,
     centre = 0.5, slope = -90,
     cores = n_cores_gam
   )
-  
+
   samples_try <- as.matrix(do.call("rbind", samples_try))
-  
+
   registerDoMC(n_cores_fire)
   sim <- similarity_simulate_parallel(particles_mat = samples_try,
                                       fire_data = spread_data)
-  
+
   # filter particles above threshold
   use <- sim$abc_prob >= threshold
   colnames(sim$par_values) <- par_names
-  
+
   samples_out <- sim$par_values[use, ]
   return(samples_out)
 }
@@ -1262,9 +1262,9 @@ abc_gam <- function(gam, support_sampling, threshold, spread_data,
 # (tested with fire 1, error at fire 26)
 
 for(f in 26:n_fires) {
-  
+
   write_file <- ifelse(f > 30, TRUE, FALSE)
-  
+
   fire_file <- size_data$file[f]
   fire_name <- size_data$fire_id[f]
   print(paste("Fire:", fire_name))
@@ -1273,11 +1273,11 @@ for(f in 26:n_fires) {
   spread_data <- full_data[c("landscape", "ig_rowcol",
                              "burned_layer", "burned_ids",
                              "counts_veg")]
-  
+
   bb <- get_bounds(fire_data = spread_data)
   sup <- rbind(params_lower, params_upper)
   sup[2, "steps"] <- bb["largest", "steps_used"]
-  
+
   # Explore likelihood
   # Phase 1: sobol
   if(fire_name == "2015_50") {
@@ -1285,7 +1285,7 @@ for(f in 26:n_fires) {
   } else {
     registerDoMC(15)
   }
-  
+
   ss <- sobol(n = 10000, dim = n_coef)
   particles <- scale_params(ss, sup)
   waves_1 <- rep(1:20, each = 500)
@@ -1299,18 +1299,18 @@ for(f in 26:n_fires) {
     wlocal$wave <- w
     wlocal$phase <- "sobol"
     colnames(wlocal$par_values) <- par_names
-    
+
     nn <- paste(fire_name, "-wave-", w, ".rds", sep = "")
-    
+
     if(write_file) {
       saveRDS(wlocal, file.path(target_dir, nn))
     }
-    
+
     wave1 <- rbind(wave1, wlocal)
     rr <- round(max(wave1$abc_prob), 10)
     print(paste("wave ", w, ", abc_prob max: ", rr, sep = ""))
   }
-  
+
   # wave 2: reproduce 15 % best (500 * 20 = 10000)
   print(paste("Phase: search higher. Fire: ", fire_name, sep = ""))
   wave2 <- explore_likelihood_iterate(
@@ -1320,7 +1320,7 @@ for(f in 26:n_fires) {
     centre = "global", sobol = TRUE, phase = "search_higher",
     write = write_file, fire_name = fire_name
   )
-  
+
   # 10000 iter reproducing the 100 best, to reach the max
   print(paste("Phase: search maximum. Fire: ", fire_name, sep = ""))
   wave3 <- explore_likelihood_iterate(
@@ -1330,9 +1330,9 @@ for(f in 26:n_fires) {
     centre = "global", sobol = TRUE, phase = "search_maximum",
     write = write_file, fire_name = fire_name
   )
-  
+
   thres <- max(wave3$abc_prob) * 0.95
-  
+
   # 10000 iter above thres
   print(paste("Phase: above threshold. Fire: ", fire_name, sep = ""))
   wave4 <- explore_likelihood_iterate(
@@ -1342,19 +1342,19 @@ for(f in 26:n_fires) {
     centre = "global", sobol = TRUE, phase = "above_threshold",
     write = write_file, fire_name = fire_name
   )
-  
+
   # 5000 sobol particles in the rectangle of high prob.
   above <- wave4$abc_prob >= thres
-  
+
   # reduce support
   sup_reduced <- reduce_support(wave4$par_values[above, ],
                                 sup, prop = 1)
-  
+
   # Throw particles in the reduced support.
   ss <- sobol(n = 5000, dim = n_coef)
   particles <- scale_params(ss, sup_reduced)
   waves_1 <- rep(1:10, each = 500)
-  
+
   # loop to save
   wave1 <- NULL
   print(paste("Phase: sobol at high prob. Fire: ", fire_name, sep = ""))
@@ -1365,72 +1365,72 @@ for(f in 26:n_fires) {
     wlocal$wave <- w + max(wave4$wave)
     wlocal$phase <- "sobol_2"
     colnames(wlocal$par_values) <- par_names
-    
+
     nn <- paste(fire_name, "-wave-", w, ".rds", sep = "")
-    
+
     if(write_file) {
       saveRDS(wlocal, file.path(target_dir, nn))
     }
-    
+
     wave1 <- rbind(wave1, wlocal)
     rr <- round(max(wave1$abc_prob), 10)
     print(paste("wave ", w, ", abc_prob max: ", rr, sep = ""))
   }
-  
+
   # Merge old and new data (including data used for testing)
   like_sim <- rbind(
     wave4,
     wave1[, colnames(wave4)]
   )
-  
+
   nn <- paste(fire_name, "-waveplot.png", sep = "")
   png(filename = file.path(target_dir, nn),
       width = 20, height = 11, units = "cm", res = 300)
   wave_plot(like_sim, alpha = 0.05,
             thres = thres, tit = fire_name, rc = c(2, 3))
   dev.off()
-  
+
   # Fit gam
-  
+
   print(paste("Fitting GAM. Fire: ", fire_name, sep = ""))
-  
+
   data_gam_bern <- as.data.frame(cbind(like_sim$par_values,
                                        y = as.numeric(like_sim$abc_prob >= thres)))
-  
+
   k_side <- 15
   k_int <- 6
   basis <- "cr"
   fixed <- F
-  
+
   gam_bern <- bam(
     gam_formula, data = data_gam_bern, family = "binomial",
     method = "fREML", discrete = T, nthreads = 8
   )
-  
+
   # Sample GAM-approximated posterior
-  
+
   print(paste("Sampling GAM. Fire: ", fire_name, sep = ""))
-  
+
   sup_reduced <- reduce_support(like_sim$par_values[like_sim$abc_prob >= thres, ],
                                 sup, 0.5)
   r_gam <- rejection_sample_parallel(700, gam_bern, sup_reduced,
                                      centre = 0.7,
                                      cores = 15)
   draws <- do.call("rbind", r_gam) %>% as.data.frame
-  
+
   # Check GAM
-  
+
   ids <- sample(1:nrow(draws), size = 1000, replace = F)
   ppmat <- as.matrix(draws[ids, ])
-  
+
   print(paste("Checking GAM. Fire: ", fire_name, sep = ""))
-  
+
   abc_prob_check <- similarity_simulate_parallel(particles = ppmat,
                                                  fire_data = spread_data)
-  
+
   # acceptance probability from gam
   acp <- sum(abc_prob_check$abc_prob >= thres) / nrow(abc_prob_check) * 100
-  
+
   nn <- paste(fire_name, "-gamcheck.png", sep = "")
   ttt <- paste(fire_name, "; acceptance prob = ", round(acp, 2), " %", sep = "")
   png(filename = file.path(target_dir, nn),
@@ -1440,13 +1440,13 @@ for(f in 26:n_fires) {
   abline(v = thres, col = 2, lwd = 2)
   abline(v = mean(abc_prob_check$abc_prob), col = 4, lwd = 2)
   dev.off()
-  
+
   # for(i in 1:6) {
   #   plot(like_sim$abc_prob ~ like_sim$metrics[, i],
   #        col = rgb(0, 0, 0, 0.03), pch = 19,
   #        main = colnames(like_sim$metrics)[i])
   # }
-  
+
   # save result
   res <- list(
     fire_name = fire_name,
@@ -1459,10 +1459,10 @@ for(f in 26:n_fires) {
     #   was computed
     acceptance = acp
   )
-  
+
   nn <- paste(fire_name, "-simulations_list.rds", sep = "")
   saveRDS(res, file.path(target_dir, nn))
-  
+
   # remove temporal files
   all_files_saved <- list.files(target_dir, pattern = "-wave-")
   if(length(all_files_saved) > 0) {
@@ -1521,8 +1521,8 @@ fn <- function(xun) {
 
 opt <- optim(
   unconstrain2_vec(dat$par_values[which.max(dat$metrics[, "ov"]), , drop = F],
-                   support = sup), 
-  fn, 
+                   support = sup),
+  fn,
   method = "BFGS",
   control = list(fnscale = -1, maxit = 100),
   hessian = TRUE
@@ -1588,7 +1588,7 @@ while(got < nget) {
   new <- sum(ids_sim)
   if(new > 0) {
     candidates <- rbind(candidates, candidates_try[ids_sim, ])
-    got <- got + new 
+    got <- got + new
     print(got)
   }
 }
@@ -1605,7 +1605,7 @@ pairs(candidates[1:5000, ], col = rgb(0, 0, 0, 0.1), pch = 19, cex = 0.7)
 candidates_const <- constrain2(candidates, sup)
 ov_evals <- similarity_simulate_parallel(candidates_const,
                                          fire_data = spread_data)
-log_kernel <- kernel_expquad3(ov_evals$metrics[, "ov"], overlap_max, 
+log_kernel <- kernel_expquad3(ov_evals$metrics[, "ov"], overlap_max,
                               ov_scale = 0.025,
                               log = T)
 ov_evals$ll <- exp(log_kernel)
@@ -1614,21 +1614,21 @@ ov_evals$ll <- exp(log_kernel)
 ### (todo esto es viejo, de importance sampling simple)
 # mode_prop <- modeSECdistr(object = sndist)
 # prop_max <- dmsn(mode_prop, dp = dp)
-# 
+#
 # # obtain the maximum prior / proposal density ratio
 # densq <- function(x) {
 #   exp(sum(dlogis(x, log = T)) - dmsn(x, dp = dp, log = T))
 # }
-# opt2 <- optim(mode_prop, densq, method = "BFGS", 
+# opt2 <- optim(mode_prop, densq, method = "BFGS",
 #               control = list(fnscale = -1))
 # M <- opt2$value * kernel_expquad3(1, 1, ov_scale = 0.025, log = F)
-# 
+#
 # accept_prob <- exp(log_kernel + log_prior - log(M) - log_prop)
 # accept_prob <- exp(log_kernel + log_prior) / (M * exp(log_prop))
-# 
+#
 # hist(accept_prob)
 # summary(accept_prob)
-# # las probs son bajísimas, y si les hago importance, 
+# # las probs son bajísimas, y si les hago importance,
 # w <- accept_prob / sum(accept_prob)
 # 1 / sum(w ^ 2) # el effective sample size es 1
 
@@ -1644,7 +1644,7 @@ w <- ov_evals$ll / sum(ov_evals$ll)
 ov_evals1 <- similarity_simulate_parallel(candidates_const,
                                          fire_data = spread_data,
                                          n_sim = 1)
-log_kernel1 <- kernel_expquad3(ov_evals1$metrics[, "ov"], overlap_max, 
+log_kernel1 <- kernel_expquad3(ov_evals1$metrics[, "ov"], overlap_max,
                                ov_scale = 0.025,
                                log = T)
 ov_evals1$ll <- exp(log_kernel1)
@@ -1656,13 +1656,13 @@ w1 <- ov_evals1$ll / sum(ov_evals1$ll)
 
 # Si la eff es del 2 % y queremos 5000 muestras por fuego,
 # necesitamos simular ~ 5000 / 0.02 = 250000 partículas por fuego.
-# Antes simulábamos 20 fuegos por partícula; si simulamos sólo 1, 
+# Antes simulábamos 20 fuegos por partícula; si simulamos sólo 1,
 # sería equivalente a simular 250000 / 20 = 12500 partículas con el
 # esquema anterior (puede tardar 1 o 2 días).
 
 # Esto puede ser peor si la propuesta no se asemeja tanto a la
 # posterior, pero no es tan grave.
-ids_re <- sample(1:nrow(candidates), size = 5000, prob = ov_evals1$ll, 
+ids_re <- sample(1:nrow(candidates), size = 5000, prob = ov_evals1$ll,
                  replace = T)
 ov_resamp <- ov_evals1[ids_re, ]
 wave_plot(ov_resamp, "ll", alpha = 0.1)
@@ -1670,7 +1670,7 @@ pairs(ov_resamp$par_values[1:5000, ], col = rgb(0, 0, 0, 0.1), pch = 19, cex = 0
 
 # Efectividad 3 % implica guardar 1 / 30 muestras en un MCMC... no está
 # taaaan mal. Pensá que el MCMC en R guardaba 1 / 1000
-# Todo habría sido más barato si de entrada simulábamos un fuego por 
+# Todo habría sido más barato si de entrada simulábamos un fuego por
 # partícula.
 
 
@@ -1678,8 +1678,8 @@ pairs(ov_resamp$par_values[1:5000, ], col = rgb(0, 0, 0, 0.1), pch = 19, cex = 0
 # Y si uso un kernel absoluto, que ponga los overlaps bien puntudo --------
 
 
-log_kernel1 <- kernel_expquad3(ov_evals1$metrics[, "ov"], 
-                               overlap_max = overlap_max, 
+log_kernel1 <- kernel_expquad3(ov_evals1$metrics[, "ov"],
+                               overlap_max = overlap_max,
                                ov_scale = 0.025,
                                log = T)
 ov_evals1$ll <- exp(log_kernel1)
@@ -1718,14 +1718,14 @@ hist(apply(mat_all, 1, sd))
 # El overlap varía re poco entre réplicas!! Se podría usar un kernel aún
 # más picante. Si la proposal density se estima de la misma forma,
 # no debería ser un problema.
-# 
+#
 # Podemos agarrar las mejores partículas de la tanda anterior, reproducirlas
-# mucho, y calcular este desvío, y en base a ese desvío definir la finitud 
-# del kernel. 
-# De la misma forma, usar sólo las partículas con mayor densidad 
+# mucho, y calcular este desvío, y en base a ese desvío definir la finitud
+# del kernel.
+# De la misma forma, usar sólo las partículas con mayor densidad
 # para estimar la proposal skewnormal, tipo el percentil más alto.
-# 
-# 
+#
+#
 # ESTO ES UNA BELLESA
 
 # MCMC again?? ------------------------------------------------------------
@@ -1737,14 +1737,14 @@ hist(apply(mat_all, 1, sd))
 # for adaptMCMC::MCMC, because MCMC.parallel does not allow to fix the inits.
 MCMC_parallel <- function(fun, n, adapt, scale, init_list, acc_rate = 0.234,
                           n_chains, n_cores, ...) {
-  
+
   registerDoMC(n_cores)
-  
+
   runs <- foreach(pp = init_list) %dopar% {
     MCMC(p = fun, n = n, adapt = adapt, scale = scale, init = pp,
          acc.rate = acc_rate, ...)
   }
-  
+
   return(runs)
 }
 
@@ -1776,11 +1776,11 @@ start <- lapply(1:nc, function(i) opt$par)
 #                     ov_scale = 0.025, overlap_max = overlap_max)
 
 r0 <- MCMC(
-  lp_fun, init = opt$par, 
+  lp_fun, init = opt$par,
   n = sampling_iters + adapt_iters,
-  adapt = adapt_iters, 
-  scale = cov(samples_train), 
-  support = sup, fire_data = spread_data, 
+  adapt = adapt_iters,
+  scale = cov(samples_train),
+  support = sup, fire_data = spread_data,
   ov_scale = 0.05, overlap_max = overlap_max, acc.rate = 0.234
 )
 xx <- as_draws_matrix(r0$samples[-(1:adapt_iters), ])
@@ -1827,7 +1827,7 @@ hist(densities[non_extreme])
 plot(ll[non_extreme] ~ densities[non_extreme])
 
 
-# Sample 
+# Sample
 ntry <- 1e8
 prop <- matrix(rlogis(ntry * n_coef), ntry, n_coef)
 dens <- dmsn(prop, dp = dp, log = T)
@@ -1863,18 +1863,18 @@ pairs(sims_boot$par_values, col = rgb(0, 0, 0, 0.1), pch = 19)
 # La función muestreadora debería hacer lo siguiente:
 # 01) juntar 1000 partículas para simular
 # 02) estimar el neff. Si eficiencia < 10 %,
-#     subir el umbral de densidad de aceptación, de a poco, para tener al menos 
+#     subir el umbral de densidad de aceptación, de a poco, para tener al menos
 #     15 %.
 # 03) una vez logrado eso, simular partículas hasta que el neff
 #     llegue a 2000.
 # 04) reproducir hasta tener 20000 re-muestras bootstrap, ajustar msn
 #     y listo, go to make inference.
 
-### NOOOOO, ignorar eso de la elíptica. 
+### NOOOOO, ignorar eso de la elíptica.
 ### usar importance-rejection sampling para expensive simulators
 ### (explicado arriba con sampler avoiding unuseful simulations.)
 
-# Habrá que editar el simulador para que multiplique y sume internamente 
+# Habrá que editar el simulador para que multiplique y sume internamente
 # los efectos no direccionales, porque ya no será una constante entre
 # réplicas.
 

@@ -23,11 +23,11 @@ library(truncnorm)
 library(mgcv)          # models to tune proposals
 library(DHARMa)        # model assessment
 
-library(FireSpreadFI)  # simulate fires to test model
+library(FireSpread)    # simulate fires to test model
 library(foreach)       # parallelization
 library(doMC)          # parallelization
 
-source("hierarchical model/mcmc_functions.R")
+source("spread model/mcmc_functions.R")
 
 # Functions ---------------------------------------------------------------
 
@@ -498,7 +498,7 @@ n_par <- length(par_names_all)
 n_pt <- 3 # b0, b1, s2
 
 # load file with constants to standardize
-ndvi_params <- readRDS(file.path("data", "NDVI_regional_data",
+ndvi_params <- readRDS(file.path("data", "flammability indices",
                                  "ndvi_optim_and_proportion.rds"))
 slope_sd <- ndvi_params$slope_term_sd
 
@@ -516,11 +516,11 @@ colnames(support) <- names(params_lower) <- names(params_upper) <- par_names
 support_width <- apply(support, 2, diff)
 
 # flammability indices parameters
-fi_params <- readRDS(file.path("data", "NDVI_regional_data",
+fi_params <- readRDS(file.path("data", "flammability indices",
                                "flammability_indices.rds"))
 
 # summary of predictors that make the flammability indices
-data_summ <- readRDS(file.path("data", "NDVI_regional_data",
+data_summ <- readRDS(file.path("data", "flammability indices",
                                "ndvi_elevation_summary.rds"))
 
 # to simulate fires and check model

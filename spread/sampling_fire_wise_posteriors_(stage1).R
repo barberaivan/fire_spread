@@ -48,26 +48,26 @@ library(bayesplot)     # visualize posteriors
 library(foreach)       # parallelization
 library(doMC)          # doRNG had problems with cpp functions
 
-library(FireSpreadFI)  # spread and similarity functions
+library(FireSpread)    # spread and similarity functions
 
 library(microbenchmark)
 
-source(file.path("..", "FireSpreadFI", "tests", "testthat", "R_spread_functions.R"))
+source(file.path("..", "FireSpread", "tests", "testthat", "R_spread_functions.R"))
 # for rast_from_mat and a few constants
 
 # source("estimation_functions.R") # prior_dist and other stuff
 
 # Constants --------------------------------------------------------------
 
-data_dir <- file.path("data", "focal fires data", "landscapes_FI")
+data_dir <- file.path("data", "focal fires data", "landscapes")
 filenames <- list.files(data_dir)
 n_fires <- length(filenames)
 
 # dir to save output
-target_dir <- file.path("files", "overlaps_FI2")
+target_dir <- file.path("files", "posterior_samples_stage1_exploration")
 
 # load file with constants to standardize
-fi_params <- readRDS(file.path("data", "NDVI_regional_data",
+fi_params <- readRDS(file.path("data", "flammability indices",
                                "flammability_indices.rds"))
 slope_sd <- fi_params$slope_term_sd
 

@@ -216,11 +216,11 @@ n_veg_types <- V <- 5
 
 # Import NDVI parameters estimates and other stuff ------------------------
 
-fi_params <- readRDS(file.path("data", "NDVI_regional_data",
+fi_params <- readRDS(file.path("data", "flammability indices",
                                "flammability_indices.rds"))
 
 # model to detrend ndvi
-mdetrend <- readRDS(file.path("data", "NDVI_regional_data",
+mdetrend <- readRDS(file.path("data", "flammability indices",
                               "ndvi_detrender_model.rds"))
 
 
@@ -505,7 +505,7 @@ object.size(lands) / 1e6 # 2627.7 Mb
 for(i in 1:length(lands)) {
   print(i)
   saveRDS(lands[[i]], file.path("data", "focal fires data",
-                                "landscapes_FI",
+                                "landscapes",
                                 paste(lands[[i]]$fire_id_spread, ".rds", sep = "")))
 }
 

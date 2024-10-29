@@ -1,11 +1,11 @@
-library(FireSpreadFI)
+library(FireSpread)
 library(terra)
 library(tidyverse)
 library(testthat)
 
 # r functions to compare
-similarity_dir <- file.path("..", "FireSpreadFI", "tests", "testthat", "R_similarity_functions.R")
-spread_dir <- file.path("..", "FireSpreadFI", "tests", "testthat", "R_spread_functions.R")
+similarity_dir <- file.path("..", "FireSpread", "tests", "testthat", "R_similarity_functions.R")
+spread_dir <- file.path("..", "FireSpread", "tests", "testthat", "R_spread_functions.R")
 source(similarity_dir)
 source(spread_dir)
 

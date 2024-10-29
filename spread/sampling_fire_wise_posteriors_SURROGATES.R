@@ -1,13 +1,15 @@
 # This code inherits from
-# <single fire posterior - surrogate vs simulator - binary gam - many intercepts.R>.
+# <overlap_function_estimation-many_intercepts.R>.
 
 # Here I run the simulation of small fires, to see how GAMs work.
 # Evaluate 40000 particles, fit GAM, test gam on 2000 particles.
 
-# The model with many intercepts has
-# 5 veg types
-# slope, wind
-# steps
+# I do the same as before, but with a model based on flammability indices
+# (FI), which has 6 data-level parameters:
+
+# intercept, vfi, tfi, slope, wind, steps
+
+# I will try metrics besides the overlap
 
 # Packages ----------------------------------------------------------------
 
@@ -50,17 +52,17 @@ source(file.path("..", "FireSpread", "tests", "testthat", "R_spread_functions.R"
 
 # Constants --------------------------------------------------------------
 
-data_dir <- file.path("data", "focal fires data", "landscapes")
+data_dir <- file.path("data", "focal fires data", "landscapes_FI")
 filenames <- list.files(data_dir)
 n_fires <- length(filenames)
 
 # dir to save output
-target_dir <- file.path("files", "overlaps")
+target_dir <- file.path("files", "overlaps_FI")
 
 # load file with constants to standardize
-ndvi_params <- readRDS(file.path("data", "NDVI_regional_data",
-                                 "ndvi_optim_and_proportion.rds"))
-slope_sd <- ndvi_params$slope_term_sd
+fi_params <- readRDS(file.path("data", "NDVI_regional_data",
+                               "flammability_indices.rds"))
+slope_sd <- fi_params$slope_term_sd
 
 # constants for fire spread simulation
 upper_limit <- 1
@@ -68,7 +70,9 @@ n_veg <- 5
 veg_names <- c("wet", "subalpine", "dry", "shrubland", "grassland")
 n_terrain <- 2
 terrain_names <- c("slope", "wind")
-par_names <- c(veg_names, terrain_names, "steps")
+n_fi <- 2        # flammability indices
+n_nd <- n_fi + 1 # non-directional terms in the linear predictor
+par_names <- c("intercept", "vfi", "tfi", terrain_names, "steps")
 n_coef <- length(par_names)
 
 # number of fires to simulate by particle
@@ -77,81 +81,43 @@ n_rep <- 20
 ext_alpha <- 50
 ext_beta <- 30
 
-params_lower <- c(rep(-ext_alpha, n_veg), rep(0, n_terrain), 5)
-params_upper <- c(rep(ext_alpha, n_veg), ext_beta / slope_sd, ext_beta, NA)
-
+params_lower <- c(-ext_alpha, rep(0, n_coef-2), 5)
+params_upper <- c(ext_alpha, rep(ext_beta, n_coef-2), NA)
 names(params_lower) <- names(params_upper) <- par_names
+params_upper["slope"] <- ext_beta / slope_sd
 
-gam_formula_full <- formula(
+gam_formula <- formula(
   y ~
+
     # marginal effects
-    s(wet, bs = basis, k = k_side) +
-    s(subalpine, bs = basis, k = k_side) +
-    s(dry, bs = basis, k = k_side) +
-    s(shrubland, bs = basis, k = k_side) +
-    s(grassland, bs = basis, k = k_side) +
+    s(intercept, bs = basis, k = k_side, fx = fixed) +
+    s(vfi, bs = basis, k = k_side, fx = fixed) +
+    s(tfi, bs = basis, k = k_side, fx = fixed) +
+    s(slope, bs = basis, k = k_side, fx = fixed) +
+    s(wind, bs = basis, k = k_side, fx = fixed) +
+    s(steps, bs = basis, k = k_side, fx = fixed) +
 
-    s(slope, bs = basis, k = k_side) +
-    s(wind, bs = basis, k = k_side) +
+    # interactions
+    ti(intercept, vfi, k = k_int, bs = basis, fx = fixed) +
+    ti(intercept, tfi, k = k_int, bs = basis, fx = fixed) +
+    ti(intercept, slope, k = k_int, bs = basis, fx = fixed) +
+    ti(intercept, wind, k = k_int, bs = basis, fx = fixed) +
+    ti(intercept, steps, k = k_int, bs = basis, fx = fixed) +
 
-    s(steps, bs = basis, k = k_side) +
+    ti(vfi, tfi, k = k_int, bs = basis, fx = fixed) +
+    ti(vfi, slope, k = k_int, bs = basis, fx = fixed) +
+    ti(vfi, wind, k = k_int, bs = basis, fx = fixed) +
+    ti(vfi, steps, k = k_int, bs = basis, fx = fixed) +
 
-    # interactions (intercepts)
-    ti(wet, slope, k = k_int, bs = basis) +
-    ti(wet, wind, k = k_int, bs = basis) +
+    ti(tfi, slope, k = k_int, bs = basis, fx = fixed) +
+    ti(tfi, wind, k = k_int, bs = basis, fx = fixed) +
+    ti(tfi, steps, k = k_int, bs = basis, fx = fixed) +
 
-    ti(subalpine, slope, k = k_int, bs = basis) +
-    ti(subalpine, wind, k = k_int, bs = basis) +
+    ti(slope, wind, k = k_int, bs = basis, fx = fixed) +
+    ti(slope, steps, k = k_int, bs = basis, fx = fixed) +
 
-    ti(dry, slope, k = k_int, bs = basis) +
-    ti(dry, wind, k = k_int, bs = basis) +
-
-    ti(shrubland, slope, k = k_int, bs = basis) +
-    ti(shrubland, wind, k = k_int, bs = basis) +
-
-    ti(grassland, slope, k = k_int, bs = basis) +
-    ti(grassland, wind, k = k_int, bs = basis) +
-
-    # directional interactions
-    ti(slope, wind, k = k_int, bs = basis)
+    ti(wind, steps, k = k_int, bs = basis, fx = fixed)
 )
-
-a <- "s(wet, k = k_side, bs = \"cr\")"
-as.formula(paste("y ~", a))
-
-gam_terms <- list(
-  # marginals
-  wet       = "s(wet, k = k_side, bs = \"cr\")",
-  subalpine = "s(subalpine, k = k_side, bs = \"cr\")",
-  dry       = "s(dry, k = k_side, bs = \"cr\")",
-  shrubland = "s(shrubland, k = k_side, bs = \"cr\")",
-  grassland = "s(grassland, k = k_side, bs = \"cr\")",
-
-  slope = "s(slope, k = k_side, bs = \"cr\")",
-  wind  = "s(wind, k = k_side, bs = \"cr\")",
-  steps = "s(steps, k = k_side, bs = \"cr\")",
-
-  # interactions vegetation_slope
-  wet_slope       = "ti(wet, slope, k = k_int, bs = \"cr\")",
-  subalpine_slope = "ti(subalpine, slope, k = k_int, bs = \"cr\")",
-  dry_slope       = "ti(dry, slope, k = k_int, bs = \"cr\")",
-  shrubland_slope = "ti(shrubland, slope, k = k_int, bs = \"cr\")",
-  grassland_slope = "ti(grassland, slope, k = k_int, bs = \"cr\")",
-
-  # interactions vegetation_wind
-  wet_wind       = "ti(wet, wind, k = k_int, bs = \"cr\")",
-  subalpine_wind = "ti(subalpine, wind, k = k_int, bs = \"cr\")",
-  dry_wind       = "ti(dry, wind, k = k_int, bs = \"cr\")",
-  shrubland_wind = "ti(shrubland, wind, k = k_int, bs = \"cr\")",
-  grassland_wind = "ti(grassland, wind, k = k_int, bs = \"cr\")",
-
-  # other interactions
-  slope_wind  = "ti(slope, wind, k = k_int, bs = \"cr\")",
-  slope_steps = "ti(slope, steps, k = k_int, bs = \"cr\")",
-  wind_steps  = "ti(wind, steps, k = k_int, bs = \"cr\")"
-)
-
-terms_names <- names(gam_terms)
 
 # Get landscapes size -----------------------------------------------------
 
@@ -179,6 +145,55 @@ size_data <- readRDS(file.path("data", "focal fires data", "fire_size_data.rds")
 
 normalize <- function(x) x / sum(x)
 
+# Function to compute size-based metrics. It takes the vectors of burned pixels
+# by vegetation type, and returns a vector of the same length with the relative
+# absolute differences.
+compare_size_veg <- function(counts_obs, counts_sim) {
+  size_real <- sum(counts_obs)
+  dr <- abs(counts_obs - counts_sim) / size_real
+  return(dr)
+}
+
+# compute scale for a gaussian kernel where y = p * pmax at xcrit
+get_scale <- function(xcrit, p) {
+  ss <- xcrit / sqrt(-log(p))
+  return(ss)
+}
+
+xcrit <- 0.5; p <- 0.5
+kscale <- get_scale(xcrit, p)
+
+# NOT USED
+# compare_size <- function(fire1, fire2,
+#                          qcrit = 1.5, p = 0.5,
+#                          scale = get_scale(qcrit, p)) {
+#   s1 <- sum(fire1$counts_veg); s2 <- sum(fire2$counts_veg)
+#   sq <- 1 - max(c(s1, s2)) / min(c(s1, s2))
+#   y <- exp(-(sq / scale) ^ 2)
+#   return(y)
+# }
+
+# s1 <- c(100, 200, 300, 400, 500)
+# s2 <- c(10, 210, 900, 200, 1000)
+# compare_size_veg(s1, s2) |> sum()
+# compare_size_veg(s1*2, s2*2) |> sum()
+# compare_size_veg(s1, s2) |> prod()
+# compare_size_veg(s1*2, s2*2) |> prod()
+
+# Compute acceptance probability with an exponential quadratic function,
+# based on overlap (similarity) and size difference by veg type.
+kernel_expquad <- function(overlap, sizediff, scale = kscale) {
+  # ## test:
+  # overlap <- 0.5
+  # sizediff <- compare_size_veg(s1, s2)
+  # scale = kscale
+  # ##
+  lp <-
+    ((1-overlap) / scale) ^ 2 +
+    sum((sizediff / scale) ^ 2)
+  return(exp(-lp))
+}
+
 # Simulate fires and compare then with the observed one using the overlap_spatial
 # function. The landscape argument includes all data to simulate fire, and also
 # burned and burned_ids layers.
@@ -193,28 +208,44 @@ similarity_simulate_particle <- function(particle, fire_data = NULL,
   ## testo
   # particle <- particles_sim(N = 1)
   ## end testo
+
   ov <- numeric(n_sim)
-  cv <- particle[1:n_veg]
-  ct <- particle[(n_veg+1):(n_veg+n_terrain)]
+  sdiff <- matrix(NA, n_sim, n_veg)
+
+  # terrain coefficients
+  ct <- particle[(n_nd+1):(n_coef-1)]
+
+  # non-directional effects (intercepf + fis)
+  coef_nd <- particle[1:n_nd]
+  nd_layer <- make_nd_layer(fire_data$landscape[, , c("vfi", "tfi")], coef_nd)
 
   # simulate and compute metrics
   for(i in 1:n_sim) { # simulated fires by particle
-    fire_sim <- simulate_fire_compare(
+    fire_sim <- simulate_fire_compare_veg(
+      nd_terms = nd_layer,
       vegetation = fire_data$landscape[, , 1],
-      terrain = fire_data$landscape[, , -1],
-      coef_veg = cv,
+      terrain = fire_data$landscape[, , c("elevation", "wdir", "wspeed")],
       coef_terrain = ct,
       ignition_cells = fire_data$ig_rowcol,
       upper_limit = upper_limit,
-      steps = particle[n_coef]
+      steps = particle[n_coef],
+      n_veg = n_veg
     )
 
     ov[i] <- overlap_spatial(
-      fire_sim, fire_data[c("burned_layer", "burned_ids")]
+      fire_sim[c("burned_layer", "burned_ids")],
+      fire_data[c("burned_layer", "burned_ids")]
     )
+
+    sdiff[i, ] <- compare_size_veg(fire_data$counts_veg,
+                                   fire_sim$counts_veg)
+
   }
 
-  return(ov)
+  out <- cbind(ov, sdiff)
+  colnames(out) <- c("ov", paste("sdiff", 1:n_veg, sep = ""))
+
+  return(out)
 }
 
 # The same but returning many metrics. Currently used only for steps used.
@@ -224,15 +255,21 @@ similarity_simulate_particle_metrics <- function(particle, fire_data = NULL,
 
   metrics <- matrix(NA, n_sim, 3)
   colnames(metrics) <- c("overlap", "size_diff", "steps_used")
-  cv <- particle[1:n_veg]
-  ct <- particle[(n_veg+1):(n_veg+n_terrain)]
+
+  # terrain coefficients
+  ct <- particle[(n_nd+1):(n_coef-1)]
+
+  # non-directional effects (intercepf + fis)
+  coef_nd <- particle[1:n_nd]
+  nd_layer <- make_nd_layer(fire_data$landscape[, , c("vfi", "tfi")], coef_nd)
+
 
   # simulate and compute metrics
   for(i in 1:n_sim) { # simulated fires by particle
     fire_sim <- simulate_fire_compare(
+      nd_terms = nd_layer,
       vegetation = fire_data$landscape[, , 1],
-      terrain = fire_data$landscape[, , -1],
-      coef_veg = cv,
+      terrain = fire_data$landscape[, , c("elevation", "wdir", "wspeed")],
       coef_terrain = ct,
       ignition_cells = fire_data$ig_rowcol,
       upper_limit = upper_limit,
@@ -272,6 +309,12 @@ similarity_simulate_parallel <- function(particles_mat = NULL,
                                          fire_data = NULL,
                                          n_sim = n_rep) {
 
+  # ### test:
+  # particles_mat <- particles[waves_1 == w, ]
+  # fire_data <- spread_data
+  # n_sim <- 20
+  # ###
+
   # turn particle matrix into list for parallel evaluation
   particles_list <- lapply(1:nrow(particles_mat),
                            function(x) particles_mat[x, ])
@@ -282,25 +325,32 @@ similarity_simulate_parallel <- function(particles_mat = NULL,
   }
 
   # rbind list result
-  overlap_mat <- do.call("rbind", result) %>% as.matrix()
+  metrics_arr <- abind::abind(result, along = 3)
+
+  # for each particle, get the average abc_prob, computed before averaging
+  # replicates
+  abc_prob_mat <- apply(metrics_arr, c(1, 3), function(x) {
+    kernel_expquad(x[1], x[2:(n_veg+1)], scale = kscale)
+  })
+  abc_prob_summ <- colMeans(abc_prob_mat)
+
+  metrics_summ <- apply(metrics_arr, 3, colMeans) |> t()
 
   # return data.frame
   res <- data.frame(
     wave = NA,
-    overlap = rowMeans(overlap_mat)
+    abc_prob = abc_prob_summ
   )
+  res$metrics <- metrics_summ
   res$par_values <- particles_mat
-  res$ov_values <- overlap_mat
-
-
   return(res)
 }
 
 # get_bounds: computes the metrics for the largest and smallest fires possible
-get_bounds <- function(fire_data, n_sim = n_rep) {
+get_bounds <- function(fire_data, n_sim = 1) {
 
   coef_burn_all <- c(1e6, rep(0, n_coef - 1))
-  coef_burn_none <- c(-1e6, rep(0, n_coef - 1))
+  coef_burn_none <- c(-1e6, rep(0, n_coef - 2), 1)
 
   small_fire <- similarity_simulate_particle_metrics(coef_burn_none,
                                                      fire_data = fire_data,
@@ -316,16 +366,16 @@ get_bounds <- function(fire_data, n_sim = n_rep) {
   return(sim_bounds)
 }
 
-wave_plot <- function(data, response = "overlap", alpha = 0.3, best = NULL,
+wave_plot <- function(data, response = "abc_prob", alpha = 0.3, best = NULL,
                       x = "par_values", thres = NULL, bin = FALSE,
-                      tit = NULL, rc = c(3, 3)) {
+                      tit = NULL, rc = c(2, 3)) {
 
   if(!is.null(best)) {
     data <- data[order(data[, response], decreasing = TRUE), ]
   }
 
   if(bin) {
-    data$bin <- jitter(as.numeric(data$overlap >= thres), factor = 0.2)
+    data$bin <- jitter(as.numeric(data$abc_prob >= thres), factor = 0.2)
     response <- "bin"
   }
 
@@ -349,7 +399,7 @@ wave_plot <- function(data, response = "overlap", alpha = 0.3, best = NULL,
              pch = 19, col = rgb(0, 0, 1, alpha))
     }
 
-    if(!is.null(thres) & response == "overlap") {
+    if(!is.null(thres) & response == "abc_prob") {
       abline(h = thres, col = "red")
     }
   }
@@ -385,7 +435,7 @@ wave_plot_pairs <- function(data, alpha = 0.05, thres, support = NULL,
     c("slope", "slope", "wind")
   )
 
-  dd <- data$par_values[data$overlap >= thres, ]
+  dd <- data$par_values[data$abc_prob >= thres, ]
 
   n_cols <- sapply(yvars, length)
 
@@ -410,7 +460,7 @@ wave_plot_pairs <- function(data, alpha = 0.05, thres, support = NULL,
 
 # The same, to be used only with particles (matrix)
 wave_plot_pairs2 <- function(x, alpha = 0.05, support = NULL,
-                            tit = NA, rc = c(3, 5)) {
+                             tit = NA, rc = c(3, 5)) {
 
   if(is.null(support)) {
     ranges <- apply(x, 2, range)
@@ -506,12 +556,23 @@ is_positive_definite <- function(m) {
 # a positive-definite matrix took too long. It's safer to just ignore problematic
 # parameter vector
 make_positive_definite <- function(m, corr = FALSE, max_iter = 1e4) {
+  # check NA or inf before definiteness
+  if(anyNA(m) | !all(is.finite(m))) {
+    return(NA)
+  }
+
   if(is_positive_definite(m)) {
     return(m)
   } else {
     temp <- tryNULL(nearPD(m, corr = corr, keepDiag = TRUE, maxit = max_iter))
     if(is.null(temp)) return(NA) else {
       mat <- as.matrix(temp$mat)
+
+      # check NA or inf before definiteness
+      if(anyNA(mat) | !all(is.finite(mat))) {
+        return(NA)
+      }
+
       if(!is_positive_definite(mat)) {
         return(NA)
       } else return(mat)
@@ -598,12 +659,25 @@ scale_params <- function(x, support) {
 unconstrain <- function(x, support) {
   xun <- x
 
-  names_logit <- colnames(x)[colnames(x) != "steps"]
+  names_logit <- colnames(support)[colnames(support) != "steps"]
   for(j in names_logit) {
     xun[, j] <- qlogis((x[, j] - support[1, j]) / (support[2, j] - support[1, j]))
   }
 
-  xun[, "steps"] <- log(x[, "steps"])
+  xun[, "steps"] <- log(x[, "steps", drop = F])
+
+  return(xun)
+}
+
+unconstrain_vec <- function(x, support) {
+  xun <- x
+
+  llgg <- colnames(support) != "steps"
+  xun[llgg] <- qlogis(
+    (x[llgg] - support[1, llgg]) /
+    (support[2, llgg] - support[1, llgg])
+  )
+  xun[!llgg] <- log(x[!llgg])
 
   return(xun)
 }
@@ -612,16 +686,26 @@ unconstrain <- function(x, support) {
 constrain <- function(xun, support) {
   xc <- xun
 
-  names_logit <- colnames(xun)[colnames(xun) != "steps"]
+  names_logit <- colnames(support)[colnames(support) != "steps"]
   for(j in names_logit) {
     xc[, j] <- plogis(xun[, j]) * (support[2, j] - support[1, j]) + support[1, j]
   }
 
-  xc[, "steps"] <- exp(xun[, "steps"])
+  xc[, "steps"] <- exp(xun[, "steps", drop = F])
 
   return(xc)
 }
 
+constrain_vec <- function(xun, support) {
+  xc <- xun
+
+  llgg <- colnames(support) != "steps" # logit positions
+  xc[llgg] <- plogis(xun[llgg]) * (support[2, llgg] - support[1, llgg]) + support[1, llgg]
+
+  xc[!llgg] <- exp(xun[!llgg])
+
+  return(xc)
+}
 
 
 # explore_likelihood searches particles in a space with compact support.
@@ -635,9 +719,9 @@ constrain <- function(xun, support) {
 # n_best: number of best particles to reproduce. if "all", all data available
 #   are resampled.
 # p_best: the proportion of best particles to resample. Overrides n_best.
-# accept_thres: overlap threshold below which particles will not be resampled.
+# accept_thres: abc_prob threshold below which particles will not be resampled.
 #   overrides both n_best and p_best.
-# prob_fn: function to transform overlap into probability. If not NULL,
+# prob_fn: function to transform abc_prob into probability. If not NULL,
 #   the probability is used to resample particles.
 # support: matrix with lower limits (first row) and upper limits (second row)
 #   of all variables.
@@ -662,7 +746,7 @@ explore_likelihood <- function(data, n = 600, var_factor = 1, n_best = "all",
   # if threshold is used, ignore p_best
   if(!is.null(accept_thres)) {
     p_best <- NULL
-    n_best <- sum(data$overlap >= accept_thres)
+    n_best <- sum(data$abc_prob >= accept_thres)
   }
 
   # which particles will be resampled?
@@ -675,11 +759,11 @@ explore_likelihood <- function(data, n = 600, var_factor = 1, n_best = "all",
   if(n_best == "all") {
     n_best <- nrow(data)
   } else {
-    data <- data[order(data$overlap, decreasing = TRUE), ]
+    data <- data[order(data$abc_prob, decreasing = TRUE), ]
   }
 
   # resample the best particles
-  weight <- data$overlap
+  weight <- data$abc_prob
 
   # sometimes the best particles are too few, and the computation of the vcov
   # fails. In these cases we need to smooth a bit the weights, so more than 20
@@ -758,8 +842,8 @@ explore_likelihood_iterate <- function(
 ) {
 
   last_wave <- max(data$wave)
-  m <- paste("Search starts at max overlap = ",
-             round(max(data$overlap), 4), sep = "")
+  m <- paste("Search starts at max abc_prob = ",
+             round(max(data$abc_prob), 4), sep = "")
   message(m)
 
   # initialize res as previous data
@@ -781,8 +865,8 @@ explore_likelihood_iterate <- function(
                               centre = centre, sobol = sobol,
                               phase = phase)
 
-    m <- paste("Search wave ", last_wave + i, "; max overlap = ",
-               round(max(res$overlap), 4), sep = "")
+    m <- paste("Search wave ", last_wave + i, "; max abc_prob = ",
+               round(max(res$abc_prob), 4), sep = "")
 
     if(write) {
       nn <- paste(fire_name, "-wave-", last_wave + i, ".rds", sep = "")
@@ -977,7 +1061,7 @@ tidy_samples_ind <- function(samples_list) {
   return(draws_arr2)
 }
 
-# function to evaluate ABC-posterior, based on an overlap threshold
+# function to evaluate ABC-posterior, based on an abc_prob threshold
 fn_like_sim_bin <- function(x, support = NULL, fire_data = NULL, thres = NULL) {
   xx <- invlogit_scaled_vec(x, support)
   ov <- similarity_simulate_particle(xx, n_sim = n_rep, fire_data = fire_data) %>% mean
@@ -988,7 +1072,7 @@ fn_like_sim_bin <- function(x, support = NULL, fire_data = NULL, thres = NULL) {
   }
 }
 
-# function to evaluate ABC-posterior, based on an overlap threshold
+# function to evaluate ABC-posterior, based on an abc_prob threshold
 fn_like_sim_binom <- function(x, support = NULL, fire_data = NULL, thres = NULL) {
   xx <- invlogit_scaled_vec(x, support)
   ov <- similarity_simulate_particle(xx, n_sim = n_rep, fire_data = fire_data)
@@ -1088,23 +1172,24 @@ abc_gam <- function(gam, support_sampling, threshold, spread_data,
                                       fire_data = spread_data)
 
   # filter particles above threshold
-  use <- sim$overlap >= threshold
+  use <- sim$abc_prob >= threshold
   colnames(sim$par_values) <- par_names
 
   samples_out <- sim$par_values[use, ]
   return(samples_out)
 }
 
-# Simulation, 40000 particles ----------------------------------------------
 
-# First, simulate the 48 smallest fires
-last_fire <- size_data[size_data$size_burn_rel < 0.1, ] %>% nrow() # 48
-which(size_data$fire_id == "1999_27j_N") # problems at fire 31
+# Simulate fires ----------------------------------------------------------
 
-# (tested with fire 1, error at fire 31)
-for(f in (last_fire+1):n_fires) {
+# last_fire <- size_data[size_data$size_burn_rel < 0.1, ] %>% nrow() # 48
+# which(size_data$fire_id == "1999_25j")
 
-  # f = 1
+# (tested with fire 1, error at fire 26)
+
+for(f in 26:n_fires) {
+
+  write_file <- ifelse(f > 30, TRUE, FALSE)
 
   fire_file <- size_data$file[f]
   fire_name <- size_data$fire_id[f]
@@ -1112,7 +1197,8 @@ for(f in (last_fire+1):n_fires) {
   full_data <- readRDS(file.path(data_dir, fire_file))
   # subset data needed for spread (to be cloned across workers)
   spread_data <- full_data[c("landscape", "ig_rowcol",
-                             "burned_layer", "burned_ids")]
+                             "burned_layer", "burned_ids",
+                             "counts_veg")]
 
   bb <- get_bounds(fire_data = spread_data)
   sup <- rbind(params_lower, params_upper)
@@ -1131,7 +1217,7 @@ for(f in (last_fire+1):n_fires) {
   waves_1 <- rep(1:20, each = 500)
   # loop to save
   wave1 <- NULL
-  print(paste("Phase: sobol.", fire_name, sep = ""))
+  print(paste("Phase: sobol. ", fire_name, sep = ""))
   for(w in 1:20) {
     # w = 1
     wlocal <- similarity_simulate_parallel(particles[waves_1 == w, ],
@@ -1141,11 +1227,14 @@ for(f in (last_fire+1):n_fires) {
     colnames(wlocal$par_values) <- par_names
 
     nn <- paste(fire_name, "-wave-", w, ".rds", sep = "")
-    saveRDS(wlocal, file.path(target_dir, nn))
+
+    if(write_file) {
+      saveRDS(wlocal, file.path(target_dir, nn))
+    }
 
     wave1 <- rbind(wave1, wlocal)
-    rr <- round(max(wave1$overlap), 4)
-    print(paste("wave ", w, ", overlap max: ", rr, sep = ""))
+    rr <- round(max(wave1$abc_prob), 10)
+    print(paste("wave ", w, ", abc_prob max: ", rr, sep = ""))
   }
 
   # wave 2: reproduce 15 % best (500 * 20 = 10000)
@@ -1155,7 +1244,7 @@ for(f in (last_fire+1):n_fires) {
     var_factor = c(1.5, 2, 1),
     support = sup, spread_data = spread_data,
     centre = "global", sobol = TRUE, phase = "search_higher",
-    write = T, fire_name = fire_name
+    write = write_file, fire_name = fire_name
   )
 
   # 10000 iter reproducing the 100 best, to reach the max
@@ -1165,11 +1254,10 @@ for(f in (last_fire+1):n_fires) {
     var_factor = c(1.5, 2, 1),
     support = sup, spread_data = spread_data,
     centre = "global", sobol = TRUE, phase = "search_maximum",
-    write = T, fire_name = fire_name
+    write = write_file, fire_name = fire_name
   )
 
-  thres <- max(wave3$overlap) - 0.05
-  # wave_plot(wave4, alpha = 0.1, thres = thres)
+  thres <- max(wave3$abc_prob) * 0.95
 
   # 10000 iter above thres
   print(paste("Phase: above threshold. Fire: ", fire_name, sep = ""))
@@ -1178,16 +1266,54 @@ for(f in (last_fire+1):n_fires) {
     var_factor = c(1.5, 2, 1),
     support = sup, spread_data = spread_data,
     centre = "global", sobol = TRUE, phase = "above_threshold",
-    write = T, fire_name = fire_name
+    write = write_file, fire_name = fire_name
   )
 
-  like_sim <- wave4
+  # 5000 sobol particles in the rectangle of high prob.
+  above <- wave4$abc_prob >= thres
+
+  # reduce support
+  sup_reduced <- reduce_support(wave4$par_values[above, ],
+                                sup, prop = 1)
+
+  # Throw particles in the reduced support.
+  ss <- sobol(n = 5000, dim = n_coef)
+  particles <- scale_params(ss, sup_reduced)
+  waves_1 <- rep(1:10, each = 500)
+
+  # loop to save
+  wave1 <- NULL
+  print(paste("Phase: sobol at high prob. Fire: ", fire_name, sep = ""))
+  for(w in 1:10) {
+    # w = 1
+    wlocal <- similarity_simulate_parallel(particles[waves_1 == w, ],
+                                           spread_data)
+    wlocal$wave <- w + max(wave4$wave)
+    wlocal$phase <- "sobol_2"
+    colnames(wlocal$par_values) <- par_names
+
+    nn <- paste(fire_name, "-wave-", w, ".rds", sep = "")
+
+    if(write_file) {
+      saveRDS(wlocal, file.path(target_dir, nn))
+    }
+
+    wave1 <- rbind(wave1, wlocal)
+    rr <- round(max(wave1$abc_prob), 10)
+    print(paste("wave ", w, ", abc_prob max: ", rr, sep = ""))
+  }
+
+  # Merge old and new data (including data used for testing)
+  like_sim <- rbind(
+    wave4,
+    wave1[, colnames(wave4)]
+  )
 
   nn <- paste(fire_name, "-waveplot.png", sep = "")
   png(filename = file.path(target_dir, nn),
       width = 20, height = 11, units = "cm", res = 300)
   wave_plot(like_sim, alpha = 0.05,
-            thres = thres, tit = fire_name, rc = c(2, 4))
+            thres = thres, tit = fire_name, rc = c(2, 3))
   dev.off()
 
   # Fit gam
@@ -1195,16 +1321,15 @@ for(f in (last_fire+1):n_fires) {
   print(paste("Fitting GAM. Fire: ", fire_name, sep = ""))
 
   data_gam_bern <- as.data.frame(cbind(like_sim$par_values,
-                                       y = as.numeric(like_sim$overlap >= thres)))
+                                       y = as.numeric(like_sim$abc_prob >= thres)))
 
   k_side <- 15
   k_int <- 6
   basis <- "cr"
-
-  formula_use <- gam_formula_full
+  fixed <- F
 
   gam_bern <- bam(
-    formula_use, data = data_gam_bern, family = "binomial",
+    gam_formula, data = data_gam_bern, family = "binomial",
     method = "fREML", discrete = T, nthreads = 8
   )
 
@@ -1212,7 +1337,7 @@ for(f in (last_fire+1):n_fires) {
 
   print(paste("Sampling GAM. Fire: ", fire_name, sep = ""))
 
-  sup_reduced <- reduce_support(like_sim$par_values[like_sim$overlap >= thres, ],
+  sup_reduced <- reduce_support(like_sim$par_values[like_sim$abc_prob >= thres, ],
                                 sup, 0.5)
   r_gam <- rejection_sample_parallel(700, gam_bern, sup_reduced,
                                      centre = 0.7,
@@ -1221,33 +1346,44 @@ for(f in (last_fire+1):n_fires) {
 
   # Check GAM
 
-  ids <- sample(1:nrow(draws), size = 2000, replace = F)
+  ids <- sample(1:nrow(draws), size = 1000, replace = F)
   ppmat <- as.matrix(draws[ids, ])
 
   print(paste("Checking GAM. Fire: ", fire_name, sep = ""))
 
-  overlap_check <- similarity_simulate_parallel(particles = ppmat,
-                                                fire_data = spread_data)
+  abc_prob_check <- similarity_simulate_parallel(particles = ppmat,
+                                                 fire_data = spread_data)
+
+  # acceptance probability from gam
+  acp <- sum(abc_prob_check$abc_prob >= thres) / nrow(abc_prob_check) * 100
 
   nn <- paste(fire_name, "-gamcheck.png", sep = "")
+  ttt <- paste(fire_name, "; acceptance prob = ", round(acp, 2), " %", sep = "")
   png(filename = file.path(target_dir, nn),
       width = 10, height = 10, units = "cm", res = 300)
-  hist(overlap_check$overlap, xlim = c(0, 1), main = fire_name,
-       xlab = "Overlap", ylab = "Relative frequency", freq = F)
+  hist(abc_prob_check$abc_prob, xlim = c(0, 1), main = ttt,
+       xlab = "abc_prob", ylab = "Relative frequency", freq = F)
   abline(v = thres, col = 2, lwd = 2)
-  abline(v = mean(overlap_check$overlap), col = 4, lwd = 2)
+  abline(v = mean(abc_prob_check$abc_prob), col = 4, lwd = 2)
   dev.off()
+
+  # for(i in 1:6) {
+  #   plot(like_sim$abc_prob ~ like_sim$metrics[, i],
+  #        col = rgb(0, 0, 0, 0.03), pch = 19,
+  #        main = colnames(like_sim$metrics)[i])
+  # }
 
   # save result
   res <- list(
     fire_name = fire_name,
     veg_props = round(normalize(full_data$cells_by_veg) * 100, 2),
     like_sim = like_sim,             # first 40000 simulations
-    thres = thres,                   # overlap threshold
+    thres = thres,                   # abc_prob threshold
     gam_bern = gam_bern,             # bernoulli GAM
     draws = draws,                   # draws sampled from the GAM
-    overlap_check = overlap_check    # subsample from draws for which the overlap
-                                     #   was computed
+    abc_prob_check = abc_prob_check, # subsample from draws for which the abc_prob
+    #   was computed
+    acceptance = acp
   )
 
   nn <- paste(fire_name, "-simulations_list.rds", sep = "")
@@ -1255,624 +1391,170 @@ for(f in (last_fire+1):n_fires) {
 
   # remove temporal files
   all_files_saved <- list.files(target_dir, pattern = "-wave-")
-  invisible(lapply(all_files_saved, function(f) unlink(file.path(target_dir, f))))
-
+  if(length(all_files_saved) > 0) {
+    lapply(all_files_saved, function(f) unlink(file.path(target_dir, f)))
+  }
   # clean
   remove(full_data, spread_data, wave1, wave2, wave3, wave4, like_sim)
   gc()
 }
 
+## start run 2024-08-21, 21:32 h
+## restart at 2024-08-22, 01:05 h
 
-
-# Fire 31 = 1999_27j_N (Falso Granito) had problems, it got stuck twice when
-# sampling above threshold. It has a very peaky function, and the GAM has serious
-# trouble to fit it.
-
-# Took ~ 1.3 days to run the 48 smallest fires, 40000 + 2000 particles
-# Intermediate file saving was disabled for small fires, but enabled for large
-# ones.
+## Old comment:
 # Start run of large fires at 18/07/2024 00:56
-
 # In total it took ~ 4.3 days
 
-# Export pair-plots --------------------------------------------------------
-
-# Visualize plots to decide which terms to include in GAMs. Write that in the
-# gam_terms_to_include.ods file.
-
-simfiles <- list.files(target_dir, pattern = "-simulations_list.rds")
-
-xvars <- list(
-  rep("slope", n_veg),
-  rep("wind", n_veg),
-  c("wind", "steps", "steps")
-)
-
-yvars <- list(
-  veg_names,
-  veg_names,
-  c("slope", "slope", "wind")
-)
-
-n_cols <- sapply(yvars, length)
-
-for(f in 1:n_fires) {
-  # f = 51
-  wlist <- readRDS(file.path(target_dir, simfiles[f]))
-
-  parvalues <- rbind(wlist$like_sim$par_values,
-                     wlist$overlap_check$par_values)
-  ovv <- c(wlist$like_sim$overlap, wlist$overlap_check$overlap)
-
-  ranges <- apply(parvalues, 2, range)
-  dd <- parvalues[ovv >= wlist$thres, ]
-
-  # waveplot including test data
-  nn <- paste(wlist$fire_name, "-waveplot_2.png", sep = "")
-  png(filename = file.path(target_dir, nn),
-      width = 22, height = 11, units = "cm", res = 300)
-
-  wave_plot(wlist$like_sim, alpha = 0.05, thres = wlist$thres,
-            rc = c(2, 5), tit = wlist$fire_name)
-  dev.off()
-
-  # pairs plot
-  nn <- paste(wlist$fire_name, "-waveplot_pairs.png", sep = "")
-  png(filename = file.path(target_dir, nn),
-      width = 22, height = 15, units = "cm", res = 300)
-
-  # start plot
-  par(mfrow = c(3, 5))
-  for(r in 1:3) {
-    for(c in 1:n_cols[r]) {
-      # r = 1; c = 1
-
-      tit <- ifelse(r == 1 & c == 1, wlist$fire_name, NA)
-
-      yname <- yvars[[r]][c]
-      xname <- xvars[[r]][c]
-
-      plot(dd[, yname] ~ dd[, xname], xlab = xname, ylab = yname,
-           xlim = ranges[, xname], ylim = ranges[, yname],
-           pch = 19, col = rgb(0, 0, 0, alpha),
-           main = tit)
-    }
-  }
-  par(mfrow = c(1, 1))
-  # end plot
-
-  dev.off()
-}
-
-# The problem was mostly related to low data availability, not so much
-# to GAMs with excessive complexity.
-# It was not low k either; GAMs with low k are able to fit very sharp surfaces.
-
-# Get more particles in the interesting area ------------------------------
-
-# run 10000 sobol particles in the square of high overlap based on the data
-# obtained up to the moment.
-# Then, fit a GAM, and sample 10000 particles. Evaluate and refit.
-# Sample 1000 more and check.
-
-# evaluate which require improvement
-drefit <- readxl::read_xls(file.path("data", "focal fires data",
-                           "gam_terms_to_include.xls"),
-                           sheet = 3)
-
-# Data to simplify GAMs
-dterms <- readxl::read_xls(file.path("data", "focal fires data",
-                                     "gam_terms_to_include.xls"),
-                           sheet = 2) %>% as.data.frame()
-rownames(dterms) <- dterms$fire_id
-dterms <- as.matrix(dterms[, -1])
-dterms[is.na(dterms)] <- 0
-
-# barplot(table(drefit$refit))
-# View(drefit)
-
-# probar con algunos:
-# fires_try <- c("1999_25j", "1999_28", "2014_1", "2014_3",  "2015_11")
-# ids_try <- which(size_data$fire_id %in% fires_try)
-
-fires_improve <- drefit$fire_id[drefit$refit > 0]
-ids_improve <- which(size_data$fire_id %in% fires_improve)
-
-for(f in ids_improve[-1]) { #1:n_fires) { # al 1 lo hice por separado.
-
-  # f = 2
-  fire_file <- size_data$file[f]
-  fire_name <- size_data$fire_id[f]
-  print(paste("Fire:", fire_name))
-  full_data <- readRDS(file.path(data_dir, fire_file))
-  # subset data needed for spread (to be cloned across workers)
-  spread_data <- full_data[c("landscape", "ig_rowcol",
-                             "burned_layer", "burned_ids")]
-
-  bb <- get_bounds(fire_data = spread_data)
-  sup <- rbind(params_lower, params_upper)
-  sup[2, "steps"] <- bb["largest", "steps_used"]
-
-  # import previous simulations
-  fn <- paste(fire_name, "-simulations_list.rds", sep = "")
-  wlist <- readRDS(file.path(target_dir, fn))
-  thres <- wlist$thres
-
-  # merge all previous simulations
-  wlist$overlap_check$phase <- "gam_check_1"
-
-  like_sim2 <- rbind(
-    wlist$like_sim,
-    wlist$overlap_check
-  )
-  above <- like_sim2$overlap >= thres
-
-  # reduce support
-  sup_reduced <- reduce_support(like_sim2$par_values[above, ],
-                                sup, prop = 0.2)
-
-  # Throw particles in the reduced support.
-  if(fire_name == "2015_50") {
-    registerDoMC(13)
-  } else {
-    registerDoMC(15)
-  }
-
-  ss <- sobol(n = 10000, dim = n_coef)
-  particles <- scale_params(ss, sup_reduced)
-  waves_1 <- rep(1:10, each = 1000)
-  # loop to save
-  wave1 <- NULL
-  print(paste("Phase: sobol. Fire: ", fire_name, sep = ""))
-  for(w in 1:10) {
-    # w = 1
-    wlocal <- similarity_simulate_parallel(particles[waves_1 == w, ],
-                                           spread_data)
-    wlocal$wave <- w + max(like_sim2$wave)
-    wlocal$phase <- "sobol_2"
-    colnames(wlocal$par_values) <- par_names
-
-    nn <- paste(fire_name, "-wave-", w, ".rds", sep = "")
-    saveRDS(wlocal, file.path(target_dir, nn))
-
-    wave1 <- rbind(wave1, wlocal)
-    rr <- round(max(wave1$overlap), 4)
-    print(paste("wave ", w, ", overlap max: ", rr, sep = ""))
-  }
-
-  # Merge old and new data (including data used for testing)
-  like_sim3 <- rbind(
-    like_sim2,
-    wave1[, colnames(like_sim2)]
-  )
-
-  # Fit gam
-  print(paste("Fitting GAM. Fire: ", fire_name, sep = ""))
-
-  data_gam_bern <- as.data.frame(
-    cbind(
-      like_sim3$par_values,
-      y = as.numeric(like_sim3$overlap >= thres)
-    )
-  )
-
-  k_side <- 15
-  k_int <- 7
-  basis <- "cr"
-
-  terms_include <- terms_names[dterms[fire_name, ] == 1]
-  formula_use <- make_gam_formula(terms_include)
-
-  gam_bern <- bam(
-    formula_use, data = data_gam_bern, family = "binomial",
-    method = "fREML", discrete = T, nthreads = 8
-  )
-
-  # Sample GAM-approximated posterior
-
-  print(paste("Sampling GAM. Fire: ", fire_name, sep = ""))
-
-  sup_gam <- reduce_support(like_sim3$par_values[like_sim3$overlap >= thres, ],
-                            sup, 0.5)
-  r_gam <- rejection_sample_parallel(670, gam_bern, sup_gam,
-                                     centre = 0.5,
-                                     cores = 15)
-  draws <- do.call("rbind", r_gam) %>% as.data.frame
-
-  # Simulate GAM-based samples
-  ppmat <- as.matrix(draws)
-
-  print(paste("Simulating GAM samples. Fire: ", fire_name, sep = ""))
-
-  wave_ids <- rep(1:15, each = 670)[1:nrow(draws)]
-  # loop to save
-  wave_gam <- NULL
-  print(paste("Phase: sim_gam. Fire: ", fire_name, sep = ""))
-
-  if(fire_name == "2015_50") {
-    registerDoMC(13)
-  } else {
-    registerDoMC(15)
-  }
-
-  for(w in 1:15) {
-    # w = 1
-    wlocal <- similarity_simulate_parallel(ppmat[wave_ids == w, ],
-                                           spread_data)
-    wlocal$wave <- w + max(like_sim3$wave)
-    wlocal$phase <- "sim_gam"
-    colnames(wlocal$par_values) <- par_names
-
-    nn <- paste(fire_name, "-wave-", w, ".rds", sep = "")
-    saveRDS(wlocal, file.path(target_dir, nn))
-
-    wave_gam <- rbind(wave_gam, wlocal)
-    print(w)
-  }
-
-  # Merge data
-  like_sim4 <- rbind(
-    like_sim3,
-    wave_gam[, colnames(like_sim3)]
-  )
-
-  # Refit GAM
-  print(paste("Re-fitting GAM. Fire: ", fire_name, sep = ""))
-
-  data_gam_bern <- as.data.frame(
-    cbind(
-      like_sim4$par_values,
-      y = as.numeric(like_sim4$overlap >= thres)
-    )
-  )
-
-  gam_bern <- bam(
-    formula_use, data = data_gam_bern, family = "binomial",
-    method = "fREML", discrete = T, nthreads = 8
-  )
-
-  # Sample GAM-approximated posterior again (test)
-  print(paste("Testing GAM. Fire: ", fire_name, sep = ""))
-  sup_gam <- reduce_support(like_sim4$par_values[like_sim4$overlap >= thres, ],
-                            sup, 0.5)
-  r_gam <- rejection_sample_parallel(100, gam_bern, sup_gam,
-                                     centre = 0.5,
-                                     cores = 15)
-  draws <- do.call("rbind", r_gam) %>% as.data.frame
-
-  if(fire_name == "2015_50") {
-    registerDoMC(13)
-  } else {
-    registerDoMC(15)
-  }
-
-  wgam <- similarity_simulate_parallel(particles = as.matrix(draws),
-                                       fire_data = spread_data)
-  wgam$wave <- max(like_sim4$wave) + 1
-  wgam$phase <- "gam_check_2"
-
-  nn <- paste(fire_name, "-gamcheck2.png", sep = "")
-  png(filename = file.path(target_dir, nn),
-      width = 10, height = 10, units = "cm", res = 300)
-  hist(wgam$overlap, xlim = c(0, 1), main = fire_name,
-       xlab = "Overlap", ylab = "Relative frequency", freq = F)
-  abline(v = thres, col = 2, lwd = 2)
-  abline(v = mean(wgam$overlap), col = 4, lwd = 2)
-  dev.off()
-
-  # save result
-  res <- list(
-    fire_name = fire_name,
-    veg_props = round(normalize(full_data$cells_by_veg) * 100, 2),
-    like_sim = like_sim4,            # simulations
-    thres = thres,                   # overlap threshold
-    gam_bern = gam_bern,             # bernoulli GAM
-    draws = draws,                   # draws sampled from the GAM
-    overlap_check = wgam,            # tested GAM samples
-    support = sup
-  )
-
-  nn <- paste(fire_name, "-simulations_list2.rds", sep = "")
-  saveRDS(res, file.path(target_dir, nn))
-
-  # remove temporal files
-  all_files_saved <- list.files(target_dir, pattern = "-wave-")
-  invisible(lapply(all_files_saved, function(f) unlink(file.path(target_dir, f))))
-
-  # clean
-  remove(full_data, spread_data, like_sim4)
-  gc()
-}
-
-
-
-# Assessing bad GAMs ------------------------------------------------------
-
-dterms <- readxl::read_xls(file.path("data", "focal fires data",
-                                     "gam_terms_to_include.xls"),
-                           sheet = 2) %>% as.data.frame()
-rownames(dterms) <- dterms$fire_id
-dterms <- as.matrix(dterms[, -1])
-dterms[is.na(dterms)] <- 0
-terms_names
-
-# Table indicating which to refit
-dcheck <- readxl::read_xls(file.path("data", "focal fires data",
-                                     "gam_terms_to_include.xls"),
-                           sheet = 3) %>% as.data.frame()
-rownames(dcheck) <- dcheck$fire_id
-dcheck <- as.matrix(dcheck[, -1])
-dcheck[is.na(dcheck)] <- 0
-dcheck[dcheck[, "refit2"] == 1, ]
-
-
-
-# Fixing GAM 1999_27j_N ---------------------------------------------------
-
-fire_name <- "1999_27j_N"
-wlist <- readRDS(file.path(target_dir,
-                           paste(fire_name, "-simulations_list2.rds", sep = "")))
-fire_file <- size_data$file[size_data$fire_id == fire_name]
+# Trying laGP -------------------------------------------------------------
+library(laGP)
+
+fff <- readRDS("files/overlaps_FI/CoCampana-simulations_list.rds")
+dat <- rbind(fff$like_sim,
+             fff$abs_prob_check)
+
+# simulate 50000 sobol particles
+f <- 2
+fire_file <- size_data$file[f]
+fire_name <- size_data$fire_id[f]
+print(paste("Fire:", fire_name))
 full_data <- readRDS(file.path(data_dir, fire_file))
+# subset data needed for spread (to be cloned across workers)
 spread_data <- full_data[c("landscape", "ig_rowcol",
-                           "burned_layer", "burned_ids")]
+                           "burned_layer", "burned_ids",
+                           "counts_veg")]
 
-x11()
-wave_plot_pairs(wlist$like_sim, thres = wlist$thres)
+bb <- get_bounds(fire_data = spread_data)
+sup <- rbind(params_lower, params_upper)
+sup[2, "steps"] <- bb["largest", "steps_used"]
 
-dterms[fire_name, ]
+registerDoMC(7)
 
-# refitted GAM with higher k but (didn't work) (marg = 20, int = 15)
-# refit in a smaller space: reduce_support(prop = 1)
-
-rows_above <- wlist$like_sim$overlap >= wlist$thres
-support_fit <- reduce_support(wlist$like_sim$par_values[rows_above, ],
-                              support = wlist$support,
-                              prop = 1)
-rows_in_fit <- within_support(wlist$like_sim$par_values, support_fit)
-
-formula_simple <- make_gam_formula(terms_names[dterms[fire_name, ] == 1])
-k_side <- 15; k_int <- 7
-basis <- "cr"
-
-data_gam_bern <- as.data.frame(
-  cbind(
-    wlist$like_sim$par_values[rows_in_fit, ],
-    y = as.numeric(wlist$like_sim$overlap[rows_in_fit] >= wlist$thres)
-  )
-)
-
-gam_bern <- bam(
-  formula_simple, data = data_gam_bern, family = "binomial",
-  method = "fREML", discrete = T, nthreads = 8
-)
-
-# Sample GAM-approximated posterior again (test)
-fff <- wlist$like_sim$overlap >= wlist$thres
-sup_gam <- reduce_support(wlist$like_sim$par_values[fff, ],
-                          wlist$support, 0.5)
-r_gam <- rejection_sample_parallel(100, gam_bern, sup_gam,
-                                   centre = 0.5,
-                                   cores = 15)
-draws <- do.call("rbind", r_gam) %>% as.data.frame
-
-registerDoMC(15)
-wgam <- similarity_simulate_parallel(particles = as.matrix(draws),
-                                     fire_data = spread_data)
-wgam$wave <- max(wlist$like_sim$wave) + 1
-wgam$phase <- "gam_check_2"
-
-nn <- paste(fire_name, "-gamcheck3.png", sep = "")
-png(filename = file.path(target_dir, nn),
-    width = 10, height = 10, units = "cm", res = 300)
-hist(wgam$overlap, xlim = c(0, 1), main = fire_name,
-     xlab = "Overlap", ylab = "Relative frequency", freq = F)
-abline(v = wlist$thres, col = 2, lwd = 2)
-abline(v = mean(wgam$overlap), col = 4, lwd = 2)
-dev.off()
-sum(wgam$overlap >= wlist$thres) / nrow(wgam)
+ss <- sobol(n = 60000, dim = n_coef)[-(1:10000), ]
+particles <- scale_params(ss, sup)
+wlocal <- similarity_simulate_parallel(particles,
+                                       spread_data)
+wlocal$wave <- 1 + max(dat$wave)
+wlocal$phase <- "sobol3"
+colnames(wlocal$par_values) <- par_names
 
 
-x11()
-wave_plot_pairs(wgam, thres = wlist$thres)
-# Could not fix it, use first gam.
+dat <- rbind(dat, wlocal)
 
-# Fixing GAM 2021_2146405150_E ---------------------------------------------------
+dat$ll <- dat$abc_prob ^ 10
 
-fire_name <- "2021_2146405150_E"
-wlist <- readRDS(file.path(target_dir,
-                           paste(fire_name, "-simulations_list2.rds", sep = "")))
-fire_file <- size_data$file[size_data$fire_id == fire_name]
-full_data <- readRDS(file.path(data_dir, fire_file))
-spread_data <- full_data[c("landscape", "ig_rowcol",
-                           "burned_layer", "burned_ids")]
+wave_plot(dat, response = "ll", alpha = 0.05)
 
-x11()
-wave_plot_pairs(wlist$like_sim, thres = wlist$thres)
+# try laGP
+test <- sample(1:nrow(dat), size = 10000)
+gg <- laGP(dat$par_values[test, ], 6, 50,
+           dat$par_values[-test, ], dat$ll[-test],
+           method = "nn")
 
-dterms[fire_name, ]
-
-# remove some interactions
-
-terms_less <- c("dry", "shrubland", "grassland",
-                "shrubland_wind", "grassland_wind",
-                "slope_wind")
-formula_simple <- make_gam_formula(terms_less)
-k_side <- 15; k_int <- 7
-basis <- "cr"
-
-data_gam_bern <- as.data.frame(
-  cbind(
-    wlist$like_sim$par_values,
-    y = as.numeric(wlist$like_sim$overlap >= wlist$thres)
-  )
-)
-
-gam_bern <- bam(
-  formula_simple, data = data_gam_bern, family = "binomial",
-  method = "fREML", discrete = T, nthreads = 8
-)
-
-# Sample GAM-approximated posterior again (test)
-fff <- wlist$like_sim$overlap >= wlist$thres
-sup_gam <- reduce_support(wlist$like_sim$par_values[fff, ],
-                          wlist$support, 0.5)
-r_gam <- rejection_sample_parallel(100, gam_bern, sup_gam,
-                                   centre = 0.5,
-                                   cores = 15)
-draws <- do.call("rbind", r_gam) %>% as.data.frame
-
-registerDoMC(15)
-wgam <- similarity_simulate_parallel(particles = as.matrix(draws),
-                                     fire_data = spread_data)
-wgam$wave <- max(wlist$like_sim$wave) + 1
-wgam$phase <- "gam_check_2"
-
-nn <- paste(fire_name, "-gamcheck3.png", sep = "")
-png(filename = file.path(target_dir, nn),
-    width = 10, height = 10, units = "cm", res = 300)
-hist(wgam$overlap, xlim = c(0, 1), main = fire_name,
-     xlab = "Overlap", ylab = "Relative frequency", freq = F)
-abline(v = wlist$thres, col = 2, lwd = 2)
-abline(v = mean(wgam$overlap), col = 4, lwd = 2)
-dev.off()
-sum(wgam$overlap >= wlist$thres) / nrow(wgam)
+plot(gg$mean ~ dat$ll[test])
+abline(0, 1, col = 2)
+# terrible
 
 
-x11()
-wave_plot_pairs(wgam, thres = wlist$thres)
+# OPTIMIZE?? assume MVN normal around the best value -----------------------
 
-# Can't fix it, use the first one.
+fn <- function(xun) {
+  x <- constrain_vec(xun, support = sup)
 
-# Fixing GAM 2021_865 ---------------------------------------------------
+  out <- similarity_simulate_particle(as.vector(x), fire_data = spread_data,
+                                      n_sim = n_rep)
 
-fire_name <- "2021_865"
-wlist1 <- readRDS(file.path(target_dir,
-                            paste(fire_name, "-simulations_list.rds", sep = "")))
-wlist2 <- readRDS(file.path(target_dir,
-                            paste(fire_name, "-simulations_list2.rds", sep = "")))
-
-
-sum(wlist1$overlap_check$overlap >= wlist1$thres) / nrow(wlist1$overlap_check)
-sum(wlist2$overlap_check$overlap >= wlist2$thres) / nrow(wlist2$overlap_check)
-
-
-
-# Proportion of good particles sampled from GAM ---------------------------
-
-dcheck <- readxl::read_xls(file.path("data", "focal fires data",
-                                     "gam_terms_to_include.xls"),
-                           sheet = 3) %>% as.data.frame()
-dcheck[is.na(dcheck)] <- 0
-dcheck$prop_above <- NA
-
-for(f in 1:nrow(df_check)) {
-  # f = 55
-  fire_name <- rownames(df_check)[f]
-  data_type <- ifelse(df_check$refit[f] == 1 & df_check$use_first[f] == 0,
-                      "-simulations_list2.rds",
-                      "-simulations_list.rds")
-
-  wlist <- readRDS(file.path(
-    target_dir, paste(fire_name, data_type, sep = "")
-  ))
-
-  pp <- sum(wlist$overlap_check$overlap >= wlist$thres) / nrow(wlist$overlap_check)
-  dcheck$prop_above[f] <- pp
+  out <- colMeans(out)
+  ll <- kernel_expquad(out[1], out[2:(n_veg+1)], scale = kscale)
+  # return(ll ^ 10)
+  return(log(ll))
 }
-# hist(dcheck$prop_above)
 
-# Sample GAM-based posteriors ---------------------------------------------
+opt <- optim(
+  unconstrain_vec(dat$par_values[which.max(dat$ll), , drop = F],
+                  support = sup),
+  fn,
+  # method = "L-BFGS-B",
+  method = "BFGS",
+  # lower = sup[1, ], upper = sup[2, ],
+  # lower = rep(-100, n_coef), upper = rep(100, n_coef),
+  control = list(fnscale = -1, maxit = 100),
+  hessian = TRUE
+)
+opt
 
-# Load check table to know which GAM to use.
-dcheck <- readxl::read_xls(file.path("data", "focal fires data",
-                                     "gam_terms_to_include.xls"),
-                           sheet = 3) %>% as.data.frame()
-dcheck[is.na(dcheck)] <- 0
+(V <- solve(-opt$hessian))
+# is_positive_definite(V)
+# make_positive_definite(V)
+# isSymmetric(V)
+# V2 <- V + diag(6) * 1e-6
+# is_positive_definite(V2)
 
-for(f in 1:nrow(size_data)) {
-  # f = 31
+unc_samples <- rmvn(5000, mu = as.numeric(opt$par), V = V)
+colnames(unc_samples) <- par_names
+samples <- constrain(unc_samples, sup)
 
-  fire_file <- size_data$file[f]
-  fire_name <- size_data$fire_id[f]
-  full_data <- readRDS(file.path(data_dir, fire_file))
-  # subset data needed for spread (to be cloned across workers)
-  spread_data <- full_data[c("landscape", "ig_rowcol",
-                             "burned_layer", "burned_ids")]
-
-  # load list with GAM, simulations, and threshold
-  data_type <- ifelse(dcheck$refit[dcheck$fire_id == fire_name] != 0 &
-                        dcheck$use_first[dcheck$fire_id == fire_name] == 0,
-                      "-simulations_list2.rds",
-                      "-simulations_list.rds")
-
-  wlist <- readRDS(file.path(
-    target_dir, paste(fire_name, data_type, sep = "")
-  ))
-
-  # proportion of accepted particles
-  pp <- sum(wlist$overlap_check$overlap >= wlist$thres) / nrow(wlist$overlap_check)
-
-  mm <- paste("Fire: ", fire_name, "; accept probability = ",
-              round(pp * 100, 2), " %", sep = "")
-  message(mm)
-
-  # Get support to sample
-  above <- wlist$like_sim$overlap >= wlist$thres
-  support_original <- rbind(params_lower, params_upper)
-  support_original[2, "steps"] <- max(wlist$like_sim$par_values[, "steps"])
-  support_sample <- reduce_support(wlist$like_sim$par_values[above, ],
-                                   support_original, prop = 0.25)
-
-  n_cores_fire <- ifelse(fire_name == "2015_50", 13, 15)
-
-  # Sample in batches of 600 particles to try
-  samples_out <- NULL
-  got <- 0
-  wave <- 0
-
-  samples_out <- readRDS(file.path(target_dir, "1999_27j_N -posterior_samples.rds"))
-  got <- nrow(samples_out)
-  wave <- 51
-
-  while(got < 5000) {
-
-    samples_i <- abc_gam(
-      gam = wlist$gam_bern, support_sampling =  support_sample,
-      threshold = wlist$thres, spread_data = spread_data,
-      n = 600, n_cores_gam = 15, n_cores_fire = n_cores_fire
-    )
-
-    wave <- wave + 1
-
-    if(!is.null(samples_i)) {
-      samples_out <- rbind(samples_out, samples_i)
-      got <- got + nrow(samples_i)
-
-      temp_file_name <- paste(fire_name, "-sampling_temp_wave_", wave, ".rds",
-                              sep = "")
-      saveRDS(samples_i, file.path(target_dir, temp_file_name))
-    }
-
-    mm <- paste("Wave ", wave, "; got ", got, sep = "")
-    message(mm)
-  }
-
-  # add fire_id, support_original and threshold as attributes
-  attr(samples_out, "fire_id") <- fire_name
-  attr(samples_out, "support") <- support_original
-  attr(samples_out, "threshold") <- wlist$thres
-
-  # write final matrix of samples
-  fn <- paste(fire_name, "-posterior_samples.rds")
-  saveRDS(samples_out, file.path(target_dir, fn))
-
-  # remove temporal files
-  all_files_saved <- list.files(target_dir, pattern = "-sampling_temp_wave_")
-  invisible(lapply(all_files_saved, function(f) unlink(file.path(target_dir, f))))
-
-  # clean
-  remove(full_data, spread_data, wlist)
-  gc()
+par(mfrow = c(1, 2))
+# p = "intercept"
+for(p in par_names) {
+  plot(density(samples[, p], from = sup[1, p], to = sup[2, p]),
+       xlab = p, ylab = "density", main = NA)
+  # plot(dat$ll ~ dat$par_values[, p], xlab = p, ylab = "abclike",
+       # cex = 0.5, col = rgb(0, 0, 0, 0.05), pch = 19)
 }
-# done?
+par(mfrow = c(1, 1))
+
+
+# Acá funciona, pero es medio trampa... todo queda remil recontra
+# repuntudo. Pruebo sin elevar la ll a la 10
+
+# Quizás más sensato que esto sería ajustar una MVN en el unconstrained
+# space y listo, pero a partir de las abc-samples.
+
+
+# MVN approximation from ABC-samples --------------------------------------
+
+f <- 10
+sims_file <- paste(size_data$fire_id[f], "-simulations_list.rds", sep = "")
+fff <- readRDS(file.path("files", "overlaps_FI", sims_file))
+dat <- rbind(fff$like_sim,
+             fff$abs_prob_check)
+
+samples_ok <- dat$par_values[dat$abc_prob >= fff$thres, ]
+samples_ok_unc <- unconstrain(samples_ok, sup)
+
+mu <- colMeans(samples_ok_unc)
+V <- cov(samples_ok_unc)
+
+samples_unc <- rmvn(5000, mu, V)
+samples <- constrain(samples_unc, sup)
+
+par(mfrow = c(2, 3))
+for(p in par_names) {
+  d1 <- density(samples_ok[, p], from = sup[1, p], to = sup[2, p], n = 2^10)
+  d2 <- density(samples[, p], from = sup[1, p], to = sup[2, p], n = 2^10)
+  yy <- c(0, max(c(d1$y, d2$y)))
+  plot(d1, ylim = yy, main = p)
+  lines(d2, col = 4, lty = 2)
+}
+par(mfrow = c(1, 1))
+
+c1 <- cor(samples_ok)
+c2 <- cor(samples)
+
+plot(c1[lower.tri(c1)] ~ c2[lower.tri(c2)],
+     xlim = c(-1, 1), ylim = c(-1, 1),
+     main = "Correlations in constrained scale",
+     ylab = "abc samples", xlab = "MVN samples")
+abline(0, 1, col = "red")
+
+
+
+# Parece bastante razonable usar un kernel MVN. porque la alternativa es
+# bastante chota. Bah, no sé.
+# # Quizás estoy antojado con hacer el mixto, pero bue, puede que sea bastante
+# mentiroso ese modelo.
+
+# Quizás mejor primero estimar el modelo con el método de Lunn, y si queda tiempo,
+# evaluar la opción de hacer el mixto asumiendo MVNs
+

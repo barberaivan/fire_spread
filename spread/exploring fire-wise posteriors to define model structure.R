@@ -35,6 +35,18 @@ summarise <- function(x) {
   return(res)
 }
 
+unconstrain <- function(x, support) {
+  xun <- x
+
+  names_logit <- colnames(x)[colnames(x) != "steps"]
+  for(j in names_logit) {
+    xun[, j] <- qlogis((x[, j] - support[1, j]) / (support[2, j] - support[1, j]))
+  }
+
+  xun[, "steps"] <- log(x[, "steps"])
+
+  return(xun)
+}
 
 # climatic data ------------------------------------------------------------
 
@@ -60,44 +72,44 @@ clim_data$fire_id2 <- clim_data$fire_id # just to use synonyms
 
 # A few constants ---------------------------------------------------------
 
-par_names <- c("wet", "subalpine", "dry", "shrubland", "grassland",
-               "slope", "wind", "steps")
+par_names <- c("intercept", "vfi", "tfi", "slope", "wind", "steps")
 n_coef <- length(par_names)
 # load file with constants to standardize
-ndvi_params <- readRDS(file.path("data", "NDVI_regional_data",
+ndvi_params <- readRDS(file.path("data", "flammability indices",
                                  "ndvi_optim_and_proportion.rds"))
 slope_sd <- ndvi_params$slope_term_sd
-
-# support for parameters
-n_veg <- 5
-n_terrain <- 2
 
 ext_alpha <- 50
 ext_beta <- 30
 
-params_lower <- c(rep(-ext_alpha, n_veg), rep(0, n_terrain))
-params_upper <- c(rep(ext_alpha, n_veg), ext_beta / slope_sd, ext_beta)
+params_lower <- c(-ext_alpha, rep(0, n_coef-2), 5)
+params_upper <- c(ext_alpha, rep(ext_beta, n_coef-2), NA)
+names(params_lower) <- names(params_upper) <- par_names
+params_upper["slope"] <- ext_beta / slope_sd
 
 support <- rbind(params_lower, params_upper)
-colnames(support) <- names(params_lower) <- names(params_upper) <- par_names[-n_coef]
+colnames(support) <- names(params_lower) <- names(params_upper) <- par_names
 support_width <- apply(support, 2, diff)
 
 # Load posteriors ---------------------------------------------------------
 
 # dir to load files
-target_dir <- file.path("files", "overlaps")
+target_dir <- file.path("files", "posterior_samples_stage1")
 
-samples_files <- list.files(target_dir, pattern = "-posterior_samples.rds")
+samples_files <- list.files(target_dir, pattern = "-samples.rds")
 
 # import in single df
 samples_df <- do.call("rbind", lapply(samples_files, function(s) {
   # s <- samples_files[30]
   rrr <- readRDS(file.path(target_dir, s))
-  fire_id <- attr(rrr, "fire_id")
+
+  # resample to get 10000
+  ids <- sample(1:nrow(rrr$samples), 10000, prob = rrr$samples$prob,
+                replace = T)
 
   r <- cbind(
-    data.frame(fire_id = fire_id),
-    as.data.frame(rrr)
+    data.frame(fire_id = rrr$fire_id),
+    as.data.frame(rrr$samples$par_values[ids, ])
   )
 
   return(r)
@@ -182,10 +194,10 @@ ggplot(posteriors_summ) +
 
 
 # ~ fwi fortnight
-ggplot(posteriors_summ[!posteriors_summ$too_wide, ]) +
+ggplot(posteriors_summ) +#[!posteriors_summ$too_wide, ]) +
   geom_smooth(aes(fwi_expquad_fortnight, y = mean), method = "lm") +
   geom_linerange(aes(fwi_expquad_fortnight, ymin = hdi_lower_95, ymax = hdi_upper_95), alpha = 0.7) +
-  geom_linerange(aes(fwi_expquad_fortnight, ymin = hdi_lower_80, ymax = hdi_upper_80), alpha = 0.7) +
+  # geom_linerange(aes(fwi_expquad_fortnight, ymin = hdi_lower_80, ymax = hdi_upper_80), alpha = 0.7) +
   geom_point(aes(fwi_expquad_fortnight, y = mean), alpha = 0.7) +
   facet_wrap(vars(par_name), ncol = 3, scales = "free_y") +
   xlab("FWI (expquad, fortnight)") +
@@ -330,6 +342,77 @@ summary(lm2) # Much better the linear effect.
 
 
 
+# The same at unconstrained scale -----------------------------------------
+
+# import in single df
+samples_df_unc <- do.call("rbind", lapply(samples_files, function(s) {
+  # s <- samples_files[30]
+  rrr <- readRDS(file.path(target_dir, s))
+
+  # resample to get 10000
+  ids <- sample(1:nrow(rrr$samples), 10000, prob = rrr$samples$prob,
+                replace = T)
+  xx <- unconstrain(rrr$samples$par_values[ids, ], support = support)
+
+  # remove non-finite
+  keep_id <- apply(xx, 1, function(x) all(is.finite(x)))
+
+  r <- cbind(
+    data.frame(fire_id = rrr$fire_id),
+    as.data.frame(xx[keep_id, ])
+  )
+
+  return(r)
+}))
+
+# longanize to summarize
+samples_unc_long <- pivot_longer(samples_df_unc,
+                             all_of(which(names(samples_df) %in% par_names)),
+                             names_to = "par_name", values_to = "par_value")
+
+posteriors_summ_unc <- aggregate(par_value ~ par_name + fire_id,
+                                 samples_unc_long, summarise)
+
+posteriors_summ_unc <- cbind(posteriors_summ_unc[, c("par_name", "fire_id")],
+                             as.data.frame(posteriors_summ_unc$par_value))
+
+# merge with FWI data
+
+# a few fires were divided for spread, but have the same data
+posteriors_summ_unc$fire_id2 <- posteriors_summ_unc$fire_id
+posteriors_summ_unc$fire_id2[grep("2011_19", posteriors_summ_unc$fire_id)] <- "2011_19"
+posteriors_summ_unc$fire_id2[grep("2015_47", posteriors_summ_unc$fire_id)] <- "2015_47"
+
+posteriors_summ_unc <- left_join(posteriors_summ_unc,
+                             clim_data[, !(colnames(clim_data) %in% "fire_id")],
+                             by = "fire_id2")
+
+# tidy factors
+posteriors_summ_unc$par_name <- factor(posteriors_summ_unc$par_name,
+                                   levels = par_names_all)
+
+fires_unique <- posteriors_summ_unc[!duplicated(posteriors_summ_unc[, c("fire_id", "area_ha")]), ]
+fires_unique <- fires_unique[order(fires_unique$area_ha), ]
+
+# View(fires_unique)
+posteriors_summ_unc$fire_id <- factor(posteriors_summ_unc$fire_id,
+                                  levels = fires_unique$fire_id)
+
+
+# ~ fwi fortnight
+ggplot(posteriors_summ_unc) +#[!posteriors_summ$too_wide, ]) +
+  geom_smooth(aes(fwi_expquad_fortnight, y = mean), method = "lm") +
+  geom_linerange(aes(fwi_expquad_fortnight, ymin = hdi_lower_95, ymax = hdi_upper_95), alpha = 0.7) +
+  # geom_linerange(aes(fwi_expquad_fortnight, ymin = hdi_lower_80, ymax = hdi_upper_80), alpha = 0.7) +
+  geom_point(aes(fwi_expquad_fortnight, y = mean), alpha = 0.7) +
+  facet_wrap(vars(par_name), ncol = 3, scales = "free_y") +
+  xlab("FWI (expquad, fortnight)") +
+  ylab("Estimates") +
+  theme(strip.text = element_text(vjust = -0.5),
+        strip.background = element_rect(fill = "white", color = "white"),
+        panel.grid.minor = element_blank())
+
+
 # Posterior correlation within fires ---------------------------------------
 
 fire_id <- unique(samples_df$fire_id)
@@ -375,7 +458,10 @@ ggplot(cor_data, aes(cor)) +
 combs <- combn(par_names, 2) %>% t %>% as.data.frame()
 ncombs <- nrow(combs)
 
-cordata <- posteriors_summ[!posteriors_summ$too_wide, ]
+cordata <- posteriors_summ_unc#[!posteriors_summ$too_wide, ]
+
+
+
 
 # fwi model
 mm <- lm(mean ~ par_name * fwi_expquad_fortnight, data = cordata)
@@ -421,13 +507,24 @@ for(cc in 1:ncombs) {
 }
 
 
+lay <- matrix(
+  c(
+    1, 2, 3, 4, 5,
+    NA, 6, 7, 8, 9,
+    NA, NA, 10, 11, 12,
+    NA, NA, NA, 13, 14,
+    NA, NA, NA, NA, 15
+  ),
+  ncol = 5
+)
+
 plot_cor_marg <- ggarrange2(plots = plots_list_marg,
-                            nrow = 6)
-ggsave("mixed model/pairs_plot_marginal.png", plot = plot_cor_marg,
-       width = 18, height = 21, units = "cm")
+                            layout = lay)
+ggsave("hierarchical model/pairs_plot_marginal.png", plot = plot_cor_marg,
+       width = 20, height = 20, units = "cm")
 
 
 plot_cor_cond <- ggarrange2(plots = plots_list_cond,
-                            nrow = 6)
-ggsave("mixed model/pairs_plot_conditional.png", plot = plot_cor_cond,
-       width = 18, height = 21, units = "cm")
+                            layout = lay)
+ggsave("hierarchical model/pairs_plot_conditional.png", plot = plot_cor_cond,
+       width = 20, height = 20, units = "cm")

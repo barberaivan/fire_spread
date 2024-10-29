@@ -50,10 +50,10 @@ mean_hdi <- function(x, name = "p_", prob = 0.95) {
 # Prepare data -------------------------------------------------------------
 
 # model to detrend ndvi
-mdetrend <- readRDS(file.path("data", "NDVI_regional_data",
+mdetrend <- readRDS(file.path("data", "flammability indices",
                               "ndvi_detrender_model.rds"))
 
-v0 <- vect(file.path("data", "NDVI_regional_data",
+v0 <- vect(file.path("data", "flammability indices",
                      "ndvi_regional_points.shp"))
 
 dveg <- readxl::read_excel("/home/ivan/Insync/Mapa vegetación WWF - Lara et al. 1999/clases de vegetacion y equivalencias.xlsx",
@@ -133,7 +133,7 @@ names(elev_summ) <- c("mean", "hdi_lower_95", "hdi_upper_95")
 data_summ <- list(ndvi = ndvi_summ,
                   elevation = elev_summ)
 
-saveRDS(data_summ, file.path("data", "NDVI_regional_data",
+saveRDS(data_summ, file.path("data", "flammability indices",
                              "ndvi_elevation_summary.rds"))
 
 # Prior check for b_ndvi --------------------------------------------------
@@ -197,9 +197,9 @@ mod <- sampling(
 )
 # 1472.29 / 60 = 24 min
 # 4 div transitions after warmup (ignore them)
-saveRDS(mod, file.path("data", "NDVI_regional_data",
+saveRDS(mod, file.path("data", "flammability indices",
                        "flammability_indices_samples.rds"))
-mod <- readRDS(file.path("data", "NDVI_regional_data",
+mod <- readRDS(file.path("data", "flammability indices",
                          "flammability_indices_samples.rds"))
 
 smod <- summary(mod)[[1]]
@@ -407,5 +407,5 @@ so spread parameters (betas) are in similar scales.
 See <flammability_indices.R> for details."
 )
 
-saveRDS(theta_hat, file.path("data", "NDVI_regional_data",
+saveRDS(theta_hat, file.path("data", "flammability indices",
                              "flammability_indices.rds"))

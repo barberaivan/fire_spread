@@ -7,6 +7,7 @@ library(rstan)
 library(lubridate)
 library(terra)
 library(bayesplot)
+library(tidyterra)
 
 # Figure size settings ----------------------------------------------------
 
@@ -225,16 +226,16 @@ igl0 <- project(igl0, "EPSG:5343")
 
 
 # parameters to compute flammability indices
-fi_params <- readRDS(file.path("data", "NDVI_regional_data",
+fi_params <- readRDS(file.path("data", "flammability indices",
                                "flammability_indices.rds"))
 
 # summary of predictors that make the flammability indices
 # (used for predictions)
-data_summ <- readRDS(file.path("data", "NDVI_regional_data",
+data_summ <- readRDS(file.path("data", "flammability indices",
                                "ndvi_elevation_summary.rds"))
 
 # model to detrend ndvi, for the vfi
-mdetrend <- readRDS(file.path("data", "NDVI_regional_data",
+mdetrend <- readRDS(file.path("data", "flammability indices",
                               "ndvi_detrender_model.rds"))
 
 
@@ -1456,7 +1457,7 @@ mcmc_dens(sizemod, pars = c("a", "b_fwi", "b_vfi", "b_tfi", "b_drz", "b_dhz",
           facet_args = list(scales = "free", ncol = 3))
 
 
-# Fire Escape model (size class) -----------------------------------------
+# Escape model (size class) -----------------------------------------
 
 ig2$area_impute <- ig2$area
 ig2$area_impute[is.na(ig2$area)] <- 0.045 # NA is less than 1pix
@@ -1488,14 +1489,14 @@ sdata_sizeclass <- list(
   prior_ls_sd = nlags * 0.75
 )
 
-smodel_sizeclass <- stan_model(file.path("ignition", "sizeclass_model.stan"))
-scmod <- sampling(
-  smodel_sizeclass, data = sdata_sizeclass, seed = 1596142, refresh = 200,
-  # cores = 1, chains = 1, iter = 5,
-  cores = 8, chains = 8, iter = 2000, warmup = 1000,
-  pars = c("a", "b_fwi", "b_vfi", "b_tfi", "b_drz", "b_dhz", "ls", "pmf")
-)
-saveRDS(scmod, file.path("files", "ignition", "sizeclass_model_samples.rds"))
+# smodel_sizeclass <- stan_model(file.path("ignition", "sizeclass_model.stan"))
+# scmod <- sampling(
+#   smodel_sizeclass, data = sdata_sizeclass, seed = 1596142, refresh = 200,
+#   # cores = 1, chains = 1, iter = 5,
+#   cores = 8, chains = 8, iter = 2000, warmup = 1000,
+#   pars = c("a", "b_fwi", "b_vfi", "b_tfi", "b_drz", "b_dhz", "ls", "pmf")
+# )
+# saveRDS(scmod, file.path("files", "ignition", "sizeclass_model_samples.rds"))
 
 scmod <- readRDS(file.path("files", "ignition", "sizeclass_model_samples.rds"))
 sscmod <- summary(scmod)[[1]]
@@ -1885,6 +1886,38 @@ ggplot(wsumm, aes(t, mean, ymin = lower, ymax = upper)) +
 nn <- file.path("ignition", "figures", "escape_fwi_weights.png")
 ggsave(nn, width = 10, height = 9, units = "cm")
 
+
+
+# Load raster for maps ----------------------------------------------------
+
+pnnh_rast <- rast(file.path("data", "pnnh_images", "pnnh_data_120m.tif"))
+names(pnnh_rast)
+plot(pnnh_rast[[1]])
+plot(pnnh, add = T)
+plot((pnnh_rast[[1]], pnnh))
+
+# Ignition probability map ------------------------------------------------
+
+
+
+
+# non-burnable
+scale_fill_manual(values = colcol,
+                  na.translate = F,
+                  na.value = "transparent",
+                  name = "No quemable",
+                  guide = guide_legend(order = 2),
+                  drop = TRUE) +
+  scale_alpha_manual(na.value = 0) +
+  geom_spatraster(data = nb_balcon) +
+
+  # burn probability
+  ggnewscale::new_scale_fill() +
+  scale_fill_viridis(na.value = "transparent", option = "F",
+                     direction = 1, begin = 0, end = 0.9,
+                     guide = guide_colourbar(order = 1),
+                     name = "Probabilidad de quemarse") +
+  geom_spatraster(data = bp_balcon)
 
 
 # TAREAS ------------------------------------------------------------------
