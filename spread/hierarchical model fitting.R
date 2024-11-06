@@ -27,7 +27,7 @@ library(FireSpread)    # simulate fires to test model
 library(foreach)       # parallelization
 library(doMC)          # parallelization
 
-source("spread model/mcmc_functions.R")
+source("spread/mcmc_functions.R")
 
 # Functions ---------------------------------------------------------------
 
@@ -82,7 +82,7 @@ constrain <- function(xun, support) {
   return(xc)
 }
 
-unconstrain_vec <- function(x, v, support) {
+constrain_vec <- function(x, v, support) {
   if(v != "steps") {
     return(plogis(x) * (support[2, v] - support[1, v]) + support[1, v])
   } else {
@@ -524,7 +524,7 @@ data_summ <- readRDS(file.path("data", "flammability indices",
                                "ndvi_elevation_summary.rds"))
 
 # to simulate fires and check model
-lands_dir <- file.path("data", "focal fires data", "landscapes_FI")
+lands_dir <- file.path("data", "focal fires data", "landscapes")
 nmet <- n_veg + 2 # size by veg, size total, overlap
 met_names <- c("overlap", "size",
                "wet", "subalpine", "dry", "shrubland", "grassland")
@@ -568,6 +568,13 @@ fires_data$area_ha_log <- log(fires_data$area_ha)
 
 fwi_mean <- mean(fires_data$fwi_expquad_fortnight)
 fwi_sd <- sd(fires_data$fwi_expquad_fortnight)
+
+### export fwi scale
+fwi_spread_mean_sd <- list(fwi_mean = fwi_mean,
+                           fwi_sd = fwi_sd)
+saveRDS(fwi_spread_mean_sd,
+        file.path("files", "hierarchical_model", "fwi_mean_sd_spread.rds"))
+###
 
 fires_data$fwi <- (fires_data$fwi_expquad_fortnight - fwi_mean) / fwi_sd
 rownames(fires_data) <- fires_data$fire_id
@@ -981,7 +988,7 @@ dlist <- lapply(1:length(ff), function(i) {
   return(x)
 })
 
-dlist[[10]][[2]] |> dimnames()
+dlist[[1]][[2]] |> dimnames()
 
 # merge in a single list
 draws <- list(
@@ -1081,6 +1088,7 @@ steps_arr <- aperm(draws$steps, c(2, 3, 1))
 names(dimnames(steps_arr)) <- c("iteration", "chain", "variable")
 dimnames(steps_arr)[[3]] <- paste("ranef", "steps", (J1+1):J, sep = "__")
 steps_arr <- as_draws_array(steps_arr)
+steps_mat <- as_draws_matrix(steps_arr)
 # ssteps <- summarise_draws(steps_arr)
 # apply(ssteps[, c("ess_tail", "ess_bulk", "rhat")], 2, range, na.rm = T)
 #      ess_tail ess_bulk      rhat
@@ -1093,6 +1101,65 @@ steps_arr <- as_draws_array(steps_arr)
 # # summ <- summarise_draws(draws_arr)
 
 npost <- nrow(fixef_mat)
+
+# Save tidy-samples in a single list -------------------------------------
+# arrays are used to ease parameter subsetting
+
+fixef_arr2 <- array(
+  NA, dim = c(7, 3, npost),
+  dimnames = list(
+    par_name = par_names_all,
+    par_type = c("a", "b", "s2"),
+    iter = 1:npost
+  )
+)
+
+for(j in 1:npost) {
+  mm <- matrix(fixef_mat[j, ], 7, 3, byrow = T)
+  fixef_arr2[, , j] <- mm
+}
+
+rho_arr2 <- array(
+  NA, dim = c(n_coef, n_coef, npost),
+  dimnames = list(
+    par_name = par_names,
+    par_name = par_names,
+    iter = 1:npost
+  )
+)
+
+for(j in 1:npost) {
+  rr <- matrix(1, n_coef, n_coef)
+  rho_vec <- rho_mat[j, , drop = T]
+  rr[lower.tri(rr)] <- rho_vec
+  rr <- t(rr)
+  rr[lower.tri(rr)] <- rho_vec
+  rho_arr2[, , ] <- rr
+}
+
+ranef_arr2 <- array(
+  NA, dim = c(n_coef, nfires_spread, npost),
+  dimnames = list(
+    par_name = par_names,
+    fire_id = fire_ids,
+    iter = 1:npost
+  )
+)
+
+for(j in 1:npost) {
+  mm <- matrix(ranef_mat[j, , drop = T], nrow = n_coef, byrow = T)
+  ranef_arr2[, , j] <- mm
+}
+
+posterior_samples <- list(
+  fixef = fixef_arr2, # a, b, sigma^2
+  rho = rho_arr2,     # correlation matrix
+  ranef = ranef_arr2, # fire-level parameters
+  steps = steps_mat   # steps of non-simulated fires
+)
+
+saveRDS(posterior_samples, file.path("files", "hierarchical_model",
+                                     "spread_model_samples.rds"))
 
 # Correlation plots -------------------------------------------------------
 
@@ -1157,8 +1224,8 @@ for(i in 1:ncomb) {
 
   vv <- c(v1, v2)
   for(p in 1:2) {
-    sims_marg2[, p, ] <- unconstrain_vec(sims_marg[, p, ], vv[p], support)
-    sims_cond2[, p, ] <- unconstrain_vec(sims_cond[, p, ], vv[p], support)
+    sims_marg2[, p, ] <- constrain_vec(sims_marg[, p, ], vv[p], support)
+    sims_cond2[, p, ] <- constrain_vec(sims_cond[, p, ], vv[p], support)
   }
 
   # Compute correlation coefficients
@@ -1377,7 +1444,7 @@ for(i in 1:npost) {
   # constrain (only logit-link ones, leave steps at log)
   for(v in 1:(n_coef-1)) {
     # v = 1
-    ranef_cons[, v, ] <- unconstrain_vec(ranef_tmp[, v, ], v = par_names[v],
+    ranef_cons[, v, ] <- constrain_vec(ranef_tmp[, v, ], v = par_names[v],
                                          support = support)
   }
   ranef_cons[, n_coef, ] <- ranef_tmp[, n_coef, ] # steps not modified
@@ -1415,7 +1482,7 @@ for(v in 1:(n_coef-1)) {
   # v = 1
   patt <- paste("__", par_names[v], "__", sep = "")
   cols <- grep(patt, colnames(ranef_mat))
-  ranef_mat_cons[, cols] <- unconstrain_vec(ranef_mat[, cols], v = par_names[v],
+  ranef_mat_cons[, cols] <- constrain_vec(ranef_mat[, cols], v = par_names[v],
                                             support)
 }
 
@@ -1656,7 +1723,7 @@ ggsave("hierarchical model/figures/steps_fwi_area.png",
 # Then, bear in mind that in landscapes wind speed was divided by the sd (1.41).
 # In the case of slope, it was not scaled.
 
-wind_sd <- 1.41 ## check value later
+wind_sd <- 1.46 ## check value later
 wind_high_kmh <- 90 ## check later
 wind_high_mps <- wind_high_kmh / 3.6
 wind_high_z <- wind_high_mps / wind_sd
@@ -1786,7 +1853,7 @@ for(i in 1:npost) {
   # constrain (only logit-link ones, leave steps at log)
   for(v in 1:(n_coef-1)) {
     # v = 1
-    ranef_cons[, v, ] <- unconstrain_vec(ranef_tmp[, v, ], v = par_names[v],
+    ranef_cons[, v, ] <- constrain_vec(ranef_tmp[, v, ], v = par_names[v],
                                          support = support)
   }
   ranef_cons3 <- aperm(ranef_cons, c(2, 1, 3))
@@ -2059,7 +2126,7 @@ for(i in 1:npost) {
   # constrain (only logit-link ones, leave steps at log)
   for(v in 1:n_coef_fi) {
     # v = 1
-    ranef_cons[, v, ] <- unconstrain_vec(ranef_tmp[, v, ], v = par_names[v],
+    ranef_cons[, v, ] <- constrain_vec(ranef_tmp[, v, ], v = par_names[v],
                                          support = support)
   }
 

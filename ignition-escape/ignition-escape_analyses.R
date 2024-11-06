@@ -9,6 +9,10 @@ library(terra)
 library(bayesplot)
 library(tidyterra)
 
+source(file.path("flammability indices",
+                 "flammability_indices_functions.R"))
+## Add vegetation recoding here.
+
 # Figure size settings ----------------------------------------------------
 
 a4h <- 29.7
@@ -1470,6 +1474,12 @@ ig2$sizeclass <- sapply(area_cuts, function(cut) {
 }) |> rowSums() + 1
 table(ig2$sizeclass)
 
+### Export fire size class data, to compare simulated size distribution
+### with observed
+# write.csv(ig2, file.path("data", "ignition", "ignition_size_data.csv"),
+#           row.names = F)
+
+
 # stan data
 sdata_sizeclass <- list(
   n = nrow(ig2),
@@ -1887,38 +1897,61 @@ nn <- file.path("ignition", "figures", "escape_fwi_weights.png")
 ggsave(nn, width = 10, height = 9, units = "cm")
 
 
+# Export summaries from pnnh point data (population) ----------------------
 
-# Load raster for maps ----------------------------------------------------
+# used to compute ignition and escape probability in another script
+pnnh_data_summary <- list(
+  dr_mean = dr_mean,  # distance from roads
+  dr_sd = dr_sd,
+  dh_mean = dh_mean,  # distance from human settlements
+  dh_sd = dh_sd,
+  fwi_mean = fwi_mean,
+  fwi_sd = fwi_sd
+)
 
-pnnh_rast <- rast(file.path("data", "pnnh_images", "pnnh_data_120m.tif"))
-names(pnnh_rast)
-plot(pnnh_rast[[1]])
-plot(pnnh, add = T)
-plot((pnnh_rast[[1]], pnnh))
-
-# Ignition probability map ------------------------------------------------
+saveRDS(pnnh_data_summary, file.path("data", "pnnh_images",
+                                     "pnnh_data_summary.rds"))
 
 
+# Escape probabilities (1pix) ----------------------------------------------
 
+# Escape from 1pix (0.09 ha) is 1 - p(size <= 0.09 ha). Such probability is
+# computed as plogis(a[1] - linear predictor), because a[1] is the logit
+# cumulative probability for the first size class.
 
-# non-burnable
-scale_fill_manual(values = colcol,
-                  na.translate = F,
-                  na.value = "transparent",
-                  name = "No quemable",
-                  guide = guide_legend(order = 2),
-                  drop = TRUE) +
-  scale_alpha_manual(na.value = 0) +
-  geom_spatraster(data = nb_balcon) +
+esc_par <- as.matrix(scmod, pars = c("a[1]",
+                                     "b_vfi", "b_tfi",
+                                     "b_drz", "b_dhz",
+                                     "b_fwi")) |> t()
 
-  # burn probability
-  ggnewscale::new_scale_fill() +
-  scale_fill_viridis(na.value = "transparent", option = "F",
-                     direction = 1, begin = 0, end = 0.9,
-                     guide = guide_colourbar(order = 1),
-                     name = "Probabilidad de quemarse") +
-  geom_spatraster(data = bp_balcon)
+# negate linear predictor
+esc_par[2:nrow(esc_par), ] <- esc_par[2:nrow(esc_par), ] * (-1)
 
+Xesc <- model.matrix.lm(~ vfi + tfi + drz + dhz + fwi_z, data = pnnh_df,
+                        na.action = "na.pass")
+na_esc <- apply(Xesc, 1, anyNA)
+
+# if predictions are computed for all samples at once, the RAM is not enough.
+# Compute posterior mean with a loop
+prob_esc <- numeric(nrow(Xesc) - sum(na_esc))
+npost <- ncol(esc_par)
+weight <- 1 / npost # to avoid sum overflow
+Xesc_complete <- Xesc[!na_esc, ]
+
+for(k in 1:npost) {
+  if(k %% 100 == 0) print(k)
+  prob_esc <- prob_esc + (1 - plogis(Xesc_complete %*% esc_par[, k])) * weight
+}
+
+prob_esc_full <- numeric(nrow(Xesc))
+prob_esc_full[na_esc] <- NA
+prob_esc_full[!na_esc] <- prob_esc
+
+# add probabilities to raster
+pnnh_rast$escprob <- prob_esc_full
+writeRaster(pnnh_rast, file.path("data", "pnnh_images", "pnnh_data_120m_ig-esc-prob.tiff"))
+
+plot(pnnh_rast[[c("igprob_l", "igprob_h", "escprob")]])
 
 # TAREAS ------------------------------------------------------------------
 

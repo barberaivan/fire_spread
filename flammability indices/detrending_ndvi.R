@@ -97,7 +97,7 @@ difflong$year <- as.numeric(difflong$year)
 # fit model to the logit-difference
 md <- bam(diff_logit ~ te(year, ndvi01_22, k = c(6, 6), bs = "cr"),#s(year, k = 10, bs = "cr"),#
           data = difflong)
-saveRDS(md, file.path("..", "data", "NDVI_regional_data", "ndvi_detrender_model.rds"))
+saveRDS(md, file.path("..", "data", "flammability indices", "ndvi_detrender_model.rds"))
 
 # res <- simulateResiduals(md, n = 500)
 # plot(res)

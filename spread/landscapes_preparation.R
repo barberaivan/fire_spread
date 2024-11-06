@@ -21,6 +21,28 @@ library(tidyverse)
 library(lubridate)
 source(file.path("..", "FireSpread", "tests", "testthat", "R_spread_functions.R"))
 # for land_cube
+source(file.path("flammability indices",
+                 "flammability_indices_functions.R"))
+# functions to compute flammability indices
+
+# average wind direction
+# cicular mean for aspect
+# from
+# https://stackoverflow.com/questions/32404222/circular-mean-in-r
+mean_circular_raw <- function (x) { # takes angle in radians
+  sinr <- sum(sin(x))
+  cosr <- sum(cos(x))
+  circmean <- atan2(sinr, cosr)
+  return(circmean)
+}
+mean_circular_deg <- function (x) { # takes angle in degrees
+  # x <- c(180, 160, 170)
+  conv <- 2 * pi / 360 # degrees to radians factor
+  mm_raw <- mean_circular_raw(conv * x) / conv
+  mm <- (mm_raw + 360) %% 360
+  return(mm)
+}
+
 
 # get paths
 gee_dir <- file.path("data", "focal fires data", "raw data from GEE")
@@ -112,6 +134,9 @@ wind_table$elev_file <- paste(wind_table$fire_id_sep, ".tif", sep = "")
 # 4.78628962675556 * 3.6
 # use 4 m/s = 14.4 km / h
 
+# mean wind direction: circular_mean(wind_table$)
+mean_circular_deg(wind_table$direction_use) # 293
+
 for(i in 1:n_fires) {
   print(wind_table$fire_id_sep[i])
 
@@ -173,7 +198,7 @@ for(i in 1:n_fires) {
 }
 
 wind_sd <- sd(unlist(windspeed_vals)) # ~ 1.46 # to standardize
-
+# wind_sd = 1.464333
 # Import ignition points --------------------------------------------------
 
 # ignition points for 2014_1 and 2008_5 (Ñorquinco and Lolog) were edited
@@ -567,3 +592,157 @@ barplot(fire_size_rel)
 
 fire_size_rel[veg_num == 5]
 # most of them are small;
+
+
+
+# PNNH landscape ----------------------------------------------------------
+
+# we use the smaller landscape, which besides being smaller than the large
+# buffer, has NDVI from year 2021... That avoids the low values around the
+# steffen-martin fire occurred in 2022.
+
+# load image
+pnnh_rast <- rast(file.path("data", "pnnh_images",
+                            "pnnh_data_spread_buffered_30m_smaller.tif"))
+
+# export elevation for WindNinja
+r <- pnnh_rast[["elevation"]]
+v <- values(r)
+if(anyNA(v)) {
+  mval <- mean(v, na.rm = T)
+  r <- subst(r, NA, mval)
+}
+writeRaster(r, file.path("data", "pnnh_images",
+                         "pnnh_data_spread_elevation_30m_smaller.tif"))
+
+
+## Make wind layers
+
+# dominant wind direction (°)
+elev_path <- "/home/ivan/Insync/Fire spread modelling/fire_spread/data/pnnh_images/pnnh_data_spread_elevation_30m_smaller.tif"
+# create config file
+cat(file = file.path(windninja_dir, "spread_config_file_pnnh.cfg"),
+    sep = "\n",
+# constants
+"num_threads               = 8
+initialization_method      = domainAverageInitialization
+input_speed                = 4.0
+input_speed_units          = mps
+output_speed_units         = mps
+input_wind_height          = 10.0
+units_input_wind_height    = m
+output_wind_height         = 10.0
+units_output_wind_height   = m
+vegetation                 = trees
+mesh_resolution            = 120.0
+units_mesh_resolution      = m
+output_buffer_clipping     = 0.0
+write_ascii_output         = true
+ascii_out_resolution       = 30.0
+units_ascii_out_resolution = m
+momentum_flag              = false
+input_direction            = 293",
+paste("elevation_file      =", elev_path)
+)
+# The RAM was not enought to use mesh_resolution = 90.0
+
+# Run WindNinja
+# system("WindNinja_cli --config_file=/home/ivan/windninja_cli_fire_spread_files/spread_config_file_pnnh.cfg")
+
+## Load wind images and project
+
+wdir_rast <- rast(file.path("data", "pnnh_images",
+                            "pnnh_data_spread_elevation_30m_smaller_293_4_30m_ang.asc"))
+wspeed_rast <- rast(file.path("data", "pnnh_images",
+                              "pnnh_data_spread_elevation_30m_smaller_293_4_30m_vel.asc"))
+
+wind_rast <- c(wdir_rast, wspeed_rast)
+names(wind_rast) <- c("direction", "speed")
+
+
+# Landscape layers names in FireSpread package
+# enum land_names {
+#   veg,    # {0: forest, 1: shrubland, 2: grassland, 99: non-burnable}
+#   ndvi    # scale(pi[v] * (ndvi - optim[v]) ^ 2, center = F)
+#   north,  # scale(slope-weighted northing, center = F)
+#   elev,   # scale(elevation)
+#   wdir,
+#   wspeed, # scale(wspeed, center = F)
+# };
+
+# Note that elevation is centred and scaled, but the other terms are only scaled.
+# The slope term is not going to be scaled because it would require to
+# compute more things during the simulation. However, its sd will be used
+# to scale its beta to be compared with other betas.
+
+# (using the same order here)
+n_fi <- 2          # number of flammability indices
+n_nd <- 1 + n_fi   # number of non-directional terms
+n_layers <- n_nd + 3
+land_names <- c("veg", "vfi", "tfi", "elev", "wdir", "wspeed")
+
+# landscape includes vegetation, but the spread function uses this separately.
+
+## Vegetation type
+veg_img <- pnnh_rast$veg
+veg_img <- subst(veg_img, dveg$cnum1, dveg$cnum3) # make NaN non-burnable
+veg_img <- subst(veg_img, NaN, 99) # make NaN non-burnable
+
+## Vegetation flammability index
+veg5 <- subst(pnnh_rast[["veg"]], dveg$cnum1, dveg$cnum2) # cnum2 has 1:5
+vfi_img <- pnnh_rast$veg # placeholder
+values(vfi_img) <- vfi_calc(values(veg5), values(pnnh_rast$ndvi))
+names(vfi_img) <- "vfi"
+
+## Topographic flammability index
+vtopo <- values(pnnh_rast[[c("elevation", "slope", "aspect")]])
+tfi_img <- vfi_img # placeholder
+values(tfi_img) <- tfi_calc(vtopo[, "elevation"], vtopo[, "aspect"],
+                            vtopo[, "slope"])
+names(tfi_img) <- "tfi"
+
+## Wind
+# project wind direction to match extent
+wind_local <- project(wind_rast,
+                      pnnh_rast,
+                      method = "cubicspline")
+names(wind_local) <- c("wdir", "wspeed")
+
+# turn wind direction to radians
+wind_local$wdir <- wind_local$wdir * (pi / 180)
+# scale windspeed
+wind_sd <- 1.464333
+wind_local$wspeed <- wind_local$wspeed / wind_sd
+
+# merge all data in a single raster
+rall <- c(veg_img, vfi_img, tfi_img, pnnh_rast$elevation, wind_local)
+
+# identify NA in the predictors to make those pixels unburnable
+vv <- values(rall)
+
+# identify burnable cells with NA values
+na_cells <- which(apply(vv, 1, anyNA))
+
+# make the na non-burnable
+vv[na_cells, "veg"] <- 99
+
+# edit values in raster
+values(rall) <- vv
+
+# replace NA with -9999 to avoid problemas with C++
+rall <- subst(rall, NA, -9999)
+rall <- subst(rall, NaN, -9999)
+
+# caution if there are a lot of NA in burnable area
+(na_prop <- length(na_cells) / ncell(rall)) * 100
+
+# make array for c++
+land_arr <- land_cube(rall)
+# str(land_arr)
+
+format(object.size(land_arr), units = "Mb")
+saveRDS(land_arr, file.path("data", "pnnh_images", "pnnh_spread_landscape_smaller.rds"))
+
+# check
+apply(land_arr, 3, function(x) summary(as.vector(x)))
+# OK
