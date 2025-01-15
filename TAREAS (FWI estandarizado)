@@ -1,0 +1,83 @@
+Usando FWI como anomalía temporal en vez de valores crudos.
+
+2024-11-07 -------------------------------------------------
+
+Por ahora estoy probando cómo funciona, guardando los scripts/datos
+terminados en "_FWIZ" o similar. Luego de ver que todo funciona, 
+eso podría borrarse.
+
+2024-11-12 -------------------------------------------------
+
+Ya simulé el régimen con FWIZ. Anda mucho mejor, a los steps hay que bajarles
+mucho menos el intercept para que ande bien. 
+
+Los scripts a limpiar serían 
+
+* weather temporal scale
+* ignition model
+* spread model
+* fire regime simulation
+
+
+## Modelado no-exponencial en func del FWIZ ------------------
+	
+Ahora, además, estoy pensando en modelar los steps y la igrate 
+con una forma saturante, no exponencial, porque vamos a proyectar
+con FWI alterado. Entonces, necesitamos una función 
+más suave que una exponencial. Para el modelo de escape no es tan
+relevante porque el efecto del FWI es bajo.
+
+La idea sería usar una logística, con un techo relativamente restringido.
+Los steps, entonces, seguirían una logitnormal escalada.
+
+Ahora vamos a editar scripts y objetos usando el sufijo _FWIZ2, que se 
+refiere a estas modificaciones. 
+En spread, en hierarchical_model_FWIZ2.R, estimaré un modelo a los steps
+(usando la posterior mean del stage 1) en Stan, para explorar un poco
+el efecto de las previas y las restricciones.
+
+Por ej, 
+
+lower_limit = 1
+
+upper_limit: 
+	<lower = max(steps_fitted) + 0.0001, upper = k * max(steps_fitted) + 0.0001>
+
+	Donde k>1 puede ser 2, o 1.5. Pensar en los steps requeridos para quemar
+	todo el parque de lado a lado.
+
+midpoint: 
+	<upper = mean(FWIZ_spread)> 
+	<upper = quantile(FWIZ_spread, 0.75)> OR
+	midpoint ~ normal(centre, 0.5 * sd(FWIZ_spread))
+		donde centre puede ser la media
+
+	Esto eviataría que la curva sea completamente exponencial en el rango
+	de FWIZ observado.
+	A la vez, es el punto de máxima varianza, lo que evitaría que se nos 
+	vayan al diablo los simulados.	
+		
+intercept ~ normal(0, 1) 
+	Esto evitaría que el intercept se vaya muy abajo o muy arriba, disminuyendo
+	la correlación con el upper_limit.
+
+Estimarlo primero sin tantas limitaciones a ver qué pasa.
+Luego, ver cuán necesario es limitarlo.
+	
+Sin limitaciones llega bien a upper < 2000, lo cual implica correr como máximo 60 km
+desde la ignición (todo el bosque). pero el upper medio anda por ~ 1400.
+
+
+
+2024-11-20 -------------------------------------------------
+
+Definitivamente el FWIZ anda mucho mejor, así que luego volaré todo lo que 
+no tenía el Z. Pero ahora sigo en otras grandes modificaciones:
+Modelos no exponenciales para steps-spread and ignition rate (temporal eff).
+Uso logísticas. Por eso ahora dicen "FWIZ2", se refiere a eso,
+exponenciales por logísticas.
+En el mismo momento (FWIZ2) también cambiaré los FWI que estaban a 52 km de resolución
+hacia 24 km, bajado de GEE. Esto implica actualizar weather scripts before 
+spread mcmc.
+
+

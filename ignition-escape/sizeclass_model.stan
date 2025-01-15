@@ -5,7 +5,7 @@ data {
 
   int y[n];
 
-  matrix[n, nlag] fwi_mat_z;
+  matrix[n, nlag] fwi_mat;
   vector[n] vfi;
   vector[n] tfi;
   vector[n] drz;
@@ -55,7 +55,7 @@ transformed parameters {
   // normalize
   lag_weights = lag_weights_un / sum(lag_weights_un);
 
-  eta = b_fwi * (fwi_mat_z * lag_weights) +
+  eta = b_fwi * (fwi_mat * lag_weights) +
         b_vfi * vfi + b_tfi * tfi +
         b_drz * drz + b_dhz * dhz;
 

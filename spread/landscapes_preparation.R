@@ -48,6 +48,26 @@ mean_circular_deg <- function (x) { # takes angle in degrees
 gee_dir <- file.path("data", "focal fires data", "raw data from GEE")
 windninja_dir <- "/home/ivan/windninja_cli_fire_spread_files" # path with no spaces
 
+
+# Import vegetation class transforms --------------------------------------
+
+dveg <- readxl::read_excel("/home/ivan/Insync/Mapa vegetación WWF - Lara et al. 1999/clases de vegetacion y equivalencias.xlsx",
+                           sheet = "Sheet2")
+
+# Make urban as forest, and get zero-indexing
+dveg$cnum2[dveg$class1 == "Urban"] <- 1
+dveg$class2[dveg$class1 == "Urban"] <- "Wet forest"
+dveg$cnum3 <- dveg$cnum2
+dveg$cnum3[dveg$cnum3 < 6] <- dveg$cnum3[dveg$cnum3 < 6] - 1
+dveg$cnum3[dveg$cnum2 == 6] <- 99
+# urban is taken as forest so its burn probability changes markedly with NDVI.
+
+n_veg_types <- V <- 5
+
+
+
+# Fires stuff -------------------------------------------------------------
+
 # get fire_ids
 fnames <- list.files(gee_dir)
 
@@ -197,8 +217,8 @@ for(i in 1:n_fires) {
   windspeed_vals[[i]] <- values(vel)
 }
 
-wind_sd <- sd(unlist(windspeed_vals)) # ~ 1.46 # to standardize
-# wind_sd = 1.464333
+wind_sd <- sd(unlist(windspeed_vals)) # = 1.464333 # to standardize
+
 # Import ignition points --------------------------------------------------
 
 # ignition points for 2014_1 and 2008_5 (Ñorquinco and Lolog) were edited
@@ -223,21 +243,6 @@ fwi_left$fire_id_match[grep("2011_19", fwi_left$fire_id)] <- "2011_19"
 
 fwi_data <- left_join(fwi_left, fwi_raw, by = "fire_id_match")
 
-
-# Import vegetation class transforms --------------------------------------
-
-dveg <- readxl::read_excel("/home/ivan/Insync/Mapa vegetación WWF - Lara et al. 1999/clases de vegetacion y equivalencias.xlsx",
-                           sheet = "Sheet2")
-
-# Make urban as forest, and get zero-indexing
-dveg$cnum2[dveg$class1 == "Urban"] <- 1
-dveg$class2[dveg$class1 == "Urban"] <- "Wet forest"
-dveg$cnum3 <- dveg$cnum2
-dveg$cnum3[dveg$cnum3 < 6] <- dveg$cnum3[dveg$cnum3 < 6] - 1
-dveg$cnum3[dveg$cnum2 == 6] <- 99
-# urban is taken as forest so its burn probability changes markedly with NDVI.
-
-n_veg_types <- V <- 5
 
 # Import NDVI parameters estimates and other stuff ------------------------
 
@@ -603,7 +608,7 @@ fire_size_rel[veg_num == 5]
 
 # load image
 pnnh_rast <- rast(file.path("data", "pnnh_images",
-                            "pnnh_data_spread_buffered_30m_smaller.tif"))
+                            "pnnh_data_spread_buffered_30m.tif"))
 
 # export elevation for WindNinja
 r <- pnnh_rast[["elevation"]]
@@ -613,18 +618,18 @@ if(anyNA(v)) {
   r <- subst(r, NA, mval)
 }
 writeRaster(r, file.path("data", "pnnh_images",
-                         "pnnh_data_spread_elevation_30m_smaller.tif"))
+                         "pnnh_data_spread_elevation_30m.tif"))
 
 
 ## Make wind layers
 
 # dominant wind direction (°)
-elev_path <- "/home/ivan/Insync/Fire spread modelling/fire_spread/data/pnnh_images/pnnh_data_spread_elevation_30m_smaller.tif"
+elev_path <- "/home/ivan/Insync/Fire spread modelling/fire_spread/data/pnnh_images/pnnh_data_spread_elevation_30m.tif"
 # create config file
 cat(file = file.path(windninja_dir, "spread_config_file_pnnh.cfg"),
     sep = "\n",
 # constants
-"num_threads               = 8
+"num_threads               = 6
 initialization_method      = domainAverageInitialization
 input_speed                = 4.0
 input_speed_units          = mps
@@ -652,9 +657,9 @@ paste("elevation_file      =", elev_path)
 ## Load wind images and project
 
 wdir_rast <- rast(file.path("data", "pnnh_images",
-                            "pnnh_data_spread_elevation_30m_smaller_293_4_30m_ang.asc"))
+                            "pnnh_data_spread_elevation_30m_293_4_30m_ang.asc"))
 wspeed_rast <- rast(file.path("data", "pnnh_images",
-                              "pnnh_data_spread_elevation_30m_smaller_293_4_30m_vel.asc"))
+                              "pnnh_data_spread_elevation_30m_293_4_30m_vel.asc"))
 
 wind_rast <- c(wdir_rast, wspeed_rast)
 names(wind_rast) <- c("direction", "speed")
@@ -741,7 +746,121 @@ land_arr <- land_cube(rall)
 # str(land_arr)
 
 format(object.size(land_arr), units = "Mb")
-saveRDS(land_arr, file.path("data", "pnnh_images", "pnnh_spread_landscape_smaller.rds"))
+saveRDS(land_arr, file.path("data", "pnnh_images", "pnnh_spread_landscape.rds"))
+
+# check
+apply(land_arr, 3, function(x) summary(as.vector(x)))
+# OK
+
+
+# PNNH landscape with unburnable urban ------------------------------------
+
+# load image
+pnnh_rast <- rast(file.path("data", "pnnh_images",
+                            "pnnh_data_spread_buffered_30m.tif"))
+
+## Load wind images and project
+
+wdir_rast <- rast(file.path("data", "pnnh_images",
+                            "pnnh_data_spread_elevation_30m_293_4_30m_ang.asc"))
+wspeed_rast <- rast(file.path("data", "pnnh_images",
+                              "pnnh_data_spread_elevation_30m_293_4_30m_vel.asc"))
+
+wind_rast <- c(wdir_rast, wspeed_rast)
+names(wind_rast) <- c("direction", "speed")
+
+
+# Landscape layers names in FireSpread package
+# enum land_names {
+#   veg,    # {0: forest, 1: shrubland, 2: grassland, 99: non-burnable}
+#   ndvi    # scale(pi[v] * (ndvi - optim[v]) ^ 2, center = F)
+#   north,  # scale(slope-weighted northing, center = F)
+#   elev,   # scale(elevation)
+#   wdir,
+#   wspeed, # scale(wspeed, center = F)
+# };
+
+# Note that elevation is centred and scaled, but the other terms are only scaled.
+# The slope term is not going to be scaled because it would require to
+# compute more things during the simulation. However, its sd will be used
+# to scale its beta to be compared with other betas.
+
+# (using the same order here)
+n_fi <- 2          # number of flammability indices
+n_nd <- 1 + n_fi   # number of non-directional terms
+n_layers <- n_nd + 3
+land_names <- c("veg", "vfi", "tfi", "elev", "wdir", "wspeed")
+
+# landscape includes vegetation, but the spread function uses this separately.
+
+## Vegetation type
+
+# turn urban into unburnable ______________________________________
+dveg$cnum4 <- dveg$cnum3
+dveg$cnum4[dveg$class1 == "Urban"] <- 99
+
+# the cnum5 is used for vfi
+dveg$cnum5 <- dveg$cnum2
+dveg$cnum5[dveg$class1 == "Urban"] <- 6
+
+veg_img <- pnnh_rast$veg
+veg_img <- subst(veg_img, dveg$cnum1, dveg$cnum4) 
+veg_img <- subst(veg_img, NaN, 99) # make NaN non-burnable
+
+## Vegetation flammability index
+veg5 <- subst(pnnh_rast[["veg"]], dveg$cnum1, dveg$cnum5) # cnum2=5 has 1:5
+vfi_img <- pnnh_rast$veg # placeholder
+values(vfi_img) <- vfi_calc(values(veg5), values(pnnh_rast$ndvi))
+names(vfi_img) <- "vfi"
+
+## Topographic flammability index
+vtopo <- values(pnnh_rast[[c("elevation", "slope", "aspect")]])
+tfi_img <- vfi_img # placeholder
+values(tfi_img) <- tfi_calc(vtopo[, "elevation"], vtopo[, "aspect"],
+                            vtopo[, "slope"])
+names(tfi_img) <- "tfi"
+
+## Wind
+# project wind direction to match extent
+wind_local <- project(wind_rast,
+                      pnnh_rast,
+                      method = "cubicspline")
+names(wind_local) <- c("wdir", "wspeed")
+
+# turn wind direction to radians
+wind_local$wdir <- wind_local$wdir * (pi / 180)
+# scale windspeed
+wind_sd <- 1.464333
+wind_local$wspeed <- wind_local$wspeed / wind_sd
+
+# merge all data in a single raster
+rall <- c(veg_img, vfi_img, tfi_img, pnnh_rast$elevation, wind_local)
+
+# identify NA in the predictors to make those pixels unburnable
+vv <- values(rall)
+
+# identify burnable cells with NA values
+na_cells <- which(apply(vv, 1, anyNA))
+
+# make the na non-burnable
+vv[na_cells, "veg"] <- 99
+
+# edit values in raster
+values(rall) <- vv
+
+# replace NA with -9999 to avoid problemas with C++
+rall <- subst(rall, NA, -9999)
+rall <- subst(rall, NaN, -9999)
+
+# caution if there are a lot of NA in burnable area
+(na_prop <- length(na_cells) / ncell(rall)) * 100
+
+# make array for c++
+land_arr <- land_cube(rall)
+# str(land_arr)
+
+format(object.size(land_arr), units = "Mb")
+saveRDS(land_arr, file.path("data", "pnnh_images", "pnnh_spread_landscape_urban-nonburnable.rds"))
 
 # check
 apply(land_arr, 3, function(x) summary(as.vector(x)))

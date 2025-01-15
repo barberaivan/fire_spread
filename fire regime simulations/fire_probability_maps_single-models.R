@@ -138,8 +138,8 @@ dveg$veg_num <- dveg$cnum2
 
 # Models ------------------------------------------------------------------
 
-igmod <- readRDS(file.path("files", "ignition", "ignition_model_samples.rds"))
-escmod <- readRDS(file.path("files", "ignition", "sizeclass_model_samples.rds"))
+igmod <- readRDS(file.path("files", "ignition_FWIZ", "ignition_model_samples.rds"))
+escmod <- readRDS(file.path("files", "ignition_FWIZ", "escape_model_samples.rds"))
 smod <- readRDS(file.path("files", "hierarchical_model",
                           "spread_model_samples.rds"))
 
@@ -208,8 +208,8 @@ prob_pred_l_full[!na_l] <- prob_pred_l
 pnnh_rast$igprob_h <- prob_pred_h_full
 pnnh_rast$igprob_l <- prob_pred_l_full
 
-plot(pnnh_rast$igprob_h)
-plot(pnnh_rast$igprob_l)
+plot(pnnh_rast$igprob_h, range = c(0, 0.6))
+plot(pnnh_rast$igprob_l, range = c(0, 0.5))
 
 # writeRaster(pnnh_rast, file.path("data", "pnnh_images", "pnnh_data_120m_ig-prob.tiff"))
 
@@ -315,4 +315,4 @@ pnnh_rast$spreadprob <- prob_spread_full
 
 plot(pnnh_rast[[c("igprob_l", "igprob_h", "escprob", "spreadprob")]])
 
-# writeRaster(pnnh_rast, file.path("data", "pnnh_images", "pnnh_data_120m_ig-esc-spread-prob.tiff"))
+# writeRaster(pnnh_rast, file.path("data", "pnnh_images", "pnnh_data_120m_ig-esc-spread-prob_FWIZ.tiff"))

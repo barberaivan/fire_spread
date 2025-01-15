@@ -346,9 +346,13 @@ simulate_fire_season <- function(fwi_raster,
 
     ## Escape from ignited cells
     cells_ig <- c(cells_ig_h, cells_ig_l)
-    ## test if only 1 cell
-    cells_ig <- cells_ig[1]; n_ig_l = 0; n_ig_h = 1
-    causes <- rep(c("human", "lightning"), c(n_ig_h, n_ig_l))
+
+
+# BUG ACÁ: siempre estaba simulando una ig. SIEMPRE. ----------------------
+#   (ESTO NO ESTABA COMENTADO)
+    # ## test if only 1 cell
+    # cells_ig <- cells_ig[1]; n_ig_l = 0; n_ig_h = 1
+    # causes <- rep(c("human", "lightning"), c(n_ig_h, n_ig_l))
 
     vals_ig <- pnnh_vals[cells_ig, c("vfi", "tfi", "drz", "dhz"), drop = F]
     # get FWI at ignited cells
@@ -528,7 +532,7 @@ size_distance <- function(x) {
 }
 
 # Bhattacharyya distance between empirical densities, computed from samples x and y.
-# n is the number of points to compute the initial density, then it is 
+# n is the number of points to compute the initial density, then it is
 # multiplied by 3. lower is the lower limit to fit the density.
 bhattacharyya_distance <- function(x, y, n = 2 ^ 11, lower = NULL) {
   # Initial densities, to check limits
@@ -539,24 +543,29 @@ bhattacharyya_distance <- function(x, y, n = 2 ^ 11, lower = NULL) {
     dx0 <- density(x, from = lower, n = n)
     dy0 <- density(y, from = lower, n = n)
   }
-  
+
   if(is.null(lower)) {
-    lower <- min(c(dx0$x, dy0$x)) 
+    lower <- min(c(dx0$x, dy0$x))
   }
   upper <- max(c(dx0$x, dy0$x))
   # refit densities with lower and upper
   dx <- density(x, from = lower, to = upper, n = n * 3)
   dy <- density(y, from = lower, to = upper, n = n * 3)
-  
+
   sqrt_prod <- function(x) {
     dens_x <- approx(dx$x, dx$y, xout = x, rule = 2)$y
     dens_y <- approx(dy$x, dy$y, xout = x, rule = 2)$y
     return(sqrt(dens_x * dens_y))
   }
-  
+
   bc <- integrate(sqrt_prod, lower, upper, subdivisions = 1e5)$value
   return(-log(bc))
 }
+
+bhattacharyya_distance_cat <- function(x, y) {
+  -log(sum(sqrt(x * y)))
+}
+
 
 # Constants for spread ----------------------------------------------------
 
@@ -1103,5 +1112,363 @@ for(i in 1:ns) {
   rm(out); gc()
 }
 
-# TAREA: Calcular la distancia en distribución discreta y en continua, 
+# TAREA: Calcular la distancia en distribución discreta y en continua,
 # usando la bhattacharyya distance.
+
+
+
+# Compare fit varying steps_intercerpt_shift ------------------------------
+
+## Load all full simulations
+
+# Load shift = 0
+ff <- list.files(export_dir, pattern = "sim_02_")
+sims0 <- do.call("c", lapply(1:length(ff), function(i) {
+  readRDS(file.path(export_dir, ff[i]))
+}))
+# get fire size table
+size_table_12 <- do.call("rbind", lapply(sims0, function(x) {
+  x$size_fwi_table
+}))
+
+# Load shift = -4.512744
+ff <- list.files(export_dir, pattern = "sim_03_")
+# load simulations
+sims_minshift <- do.call("c", lapply(1:length(ff), function(i) {
+  readRDS(file.path(export_dir, ff[i]))
+}))
+# get fire size table
+size_table_1 <- do.call("rbind", lapply(sims_minshift, function(x) {
+  x$size_fwi_table
+}))
+
+# All (12)
+shiftvals <- c(
+  seq(-4.512744, -4.512744/2, length.out = 9)[1:8],
+  seq(-4.512744/2, 0, length.out = 4)
+)
+ns <- length(shiftvals)
+
+stable_list <- vector("list", ns)
+stable_list[[1]] <- size_table_1   # starts from most negative shift
+stable_list[[ns]] <- size_table_12
+
+for(i in 2:(ns-1)) {
+  num <- str_pad(i+2, 2, pad = "0") # starting at file id number 4
+  nn <- paste("sim_", num, "_00.rds", sep = "")
+  x <- readRDS(file.path(export_dir, nn))
+  stable_list[[i]] <- do.call("rbind", lapply(x, function(x) {
+    x$size_fwi_table
+  }))
+}
+
+
+
+
+
+## Compare distributions considering all fires ----------------------------
+
+comptab <- data.frame(
+  shift = shiftvals,
+  b_cat = NA,
+  b_cont = NA,
+  sumq = NA
+)
+
+# reference distribution
+ref_cat <- size_dist(igdata$area_impute2)
+ref_cont <- log10(igdata$area_impute2)
+lower <- log10(0.09)
+
+# Compute metrics
+for(i in 1:ns) {
+  dist_cat <- size_dist(stable_list[[i]]$size * 0.09) # pixels to ha
+  dist_cont <- log10(stable_list[[i]]$size * 0.09)
+
+  comptab$b_cat[i] <- bhattacharyya_distance_cat(dist_cat, ref_cat)
+  comptab$b_cont[i] <- bhattacharyya_distance(dist_cont, ref_cont,
+                                                     lower = lower)
+  comptab$sumq[i] <- sum(10 ^ dist_cont) / sum(10 ^ ref_cont)
+}
+
+par(mfrow = c(2, 2))
+plot(b_cat ~ shift, dat = comptab, pch = 19,
+     main = "categorical size distribution")
+points(b_cat ~ shift, dat = comptab[which.min(comptab$b_cat), ],
+       pch = 19, col = "blue")
+
+plot(b_cont ~ shift, dat = comptab, pch = 19,
+     main = "continuous size distribution")
+points(b_cont ~ shift, dat = comptab[which.min(comptab$b_cont), ],
+       pch = 19, col = "blue")
+
+plot(log(sumq) ~ shift, dat = comptab, pch = 19,
+     main = "sum quotiente (sim/obs")
+abline(h = log(1))
+points(log(sumq) ~ shift, dat = comptab[which.min(abs(comptab$sumq - 1)), ],
+       pch = 19, col = "blue")
+
+plot(sumq ~ shift, dat = comptab, pch = 19,
+     main = "sum quotiente (sim/obs")
+abline(h = 1)
+points(sumq ~ shift, dat = comptab[which.min(abs(comptab$sumq - 1)), ],
+       pch = 19, col = "blue")
+par(mfrow = c(1, 1))
+
+
+# QQplots
+par(mfrow = c(3, 4))
+for(i in 1:ns) {
+  # i = 1
+  dist_cont <- log10(stable_list[[i]]$size * 0.09)
+  qqplot(ref_cont, dist_cont, xlab = "observed", ylab = "simulated",
+         main = comptab$shift[i])
+  abline(0, 1)
+}
+par(mfrow = c(1, 1))
+
+# Densities
+par(mfrow = c(3, 4))
+for(i in 1:ns) {
+  # i = 1
+  dist_cont <- log10(stable_list[[i]]$size * 0.09)
+  plot(density(dist_cont, from = lower, n = 2 ^ 11), col = "blue",
+       main = comptab$shift[i], xlab = "fire size (log10 ha)")
+  lines(density(ref_cont, from = lower, n = 2 ^ 11), col = "black")
+}
+par(mfrow = c(1, 1))
+
+
+# Barplots
+par(mfrow = c(3, 4))
+for(i in 1:ns) {
+  # i = 1
+  dist_cat <- size_dist(stable_list[[i]]$size * 0.09) # pixels to ha
+  barplot(dist_cat, col = "blue",
+          main = comptab$shift[i], xlab = "fire size class")
+  barplot(ref_cat, col = rgb(0, 0, 0, 0.4), add = T)
+}
+par(mfrow = c(1, 1))
+
+
+## Compare distributions considering fires > 0.09 ha ---------------------
+
+comptab <- data.frame(
+  shift = shiftvals,
+  b_cat = NA,
+  b_cont = NA,
+  meanq = NA,
+  sdq = NA,
+  meanq_l1 = NA,
+  sdq_l1 = NA
+)
+
+# reference distribution
+ref_cat <- size_dist(igdata$area_impute2)[-1] |> normalize()
+ref_cont <- log10(igdata$area_impute2[igdata$area_impute2 > 0.09])
+lower <- log10(0.09)
+
+# Compute metrics
+for(i in 1:ns) {
+  dist_cat <- size_dist(stable_list[[i]]$size * 0.09)[-1] |> normalize()
+  tmp <- stable_list[[i]]$size * 0.09
+  dist_cont <- log10(tmp[tmp > 0.09])
+
+  comptab$b_cat[i] <- bhattacharyya_distance_cat(dist_cat, ref_cat)
+  comptab$b_cont[i] <- bhattacharyya_distance(dist_cont, ref_cont,
+                                              lower = lower)
+  comptab$meanq[i] <- mean(10 ^ dist_cont) / mean(10 ^ ref_cont)
+  comptab$sdq[i] <- sd(10 ^ dist_cont) / sd(10 ^ ref_cont)
+
+  # the same metrics but removing the single largest
+  dist2 <- sort(dist_cont, decreasing = T)[-1]
+  ref2 <- sort(ref_cont, decreasing = T)[-1]
+  comptab$meanq_l1[i] <- mean(10 ^ dist2) / mean(10 ^ ref2)
+  comptab$sdq_l1[i] <- sd(10 ^ dist2) / sd(10 ^ ref2)
+}
+
+par(mfrow = c(2, 2))
+plot(b_cat ~ shift, dat = comptab, pch = 19,
+     main = "categorical size distribution")
+points(b_cat ~ shift, dat = comptab[which.min(comptab$b_cat), ],
+       pch = 19, col = "blue")
+
+plot(b_cont ~ shift, dat = comptab, pch = 19,
+     main = "continuous size distribution")
+points(b_cont ~ shift, dat = comptab[which.min(comptab$b_cont), ],
+       pch = 19, col = "blue")
+
+plot(meanq ~ shift, dat = comptab, pch = 19,
+     main = "means quotient (sim/obs)")
+abline(h = 1)
+points(meanq ~ shift, dat = comptab[which.min(abs(comptab$meanq - 1)), ],
+       pch = 19, col = "blue")
+
+# plot(log(meanq) ~ shift, dat = comptab, pch = 19,
+#      main = "means quotient (sim/obs)")
+# abline(h = log(1))
+# points(log(meanq) ~ shift, dat = comptab[which.min(abs(comptab$meanq - 1)), ],
+#        pch = 19, col = "blue")
+
+# plot(sdq ~ shift, dat = comptab, pch = 19,
+#      main = "sd quotient (sim/obs), log")
+# abline(h = 1)
+# points(sdq ~ shift, dat = comptab[which.min(abs(comptab$sdq - 1)), ],
+#        pch = 19, col = "blue")
+
+plot(meanq_l1 ~ shift, dat = comptab, pch = 19,
+     main = "means quotient (sim/obs)")
+abline(h = 1)
+points(meanq_l1 ~ shift, dat = comptab[which.min(abs(comptab$meanq_l1 - 1)), ],
+       pch = 19, col = "blue")
+par(mfrow = c(1, 1))
+
+# QQplots
+par(mfrow = c(3, 4))
+for(i in 1:ns) {
+  # i = 1
+  tmp <- stable_list[[i]]$size * 0.09
+  dist_cont <- log10(tmp[tmp > 0.09])
+  qqplot(ref_cont, dist_cont, xlab = "observed", ylab = "simulated",
+         main = comptab$shift[i])
+  abline(0, 1)
+}
+par(mfrow = c(1, 1))
+
+# Densities
+par(mfrow = c(3, 4))
+for(i in 1:ns) {
+  # i = 1
+  tmp <- stable_list[[i]]$size * 0.09
+  dist_cont <- log10(tmp[tmp > 0.09])
+
+  dsim <- density(dist_cont, from = lower, n = 2 ^ 11)
+  dobs <- density(ref_cont, from = lower, n = 2 ^ 11)
+  yy <- range(c(dsim$y, dobs$y)) * 1.05
+  plot(dsim, col = "blue", ylim = yy,
+       main = comptab$shift[i], xlab = "fire size (log10 ha)")
+  lines(dobs, col = "black")
+}
+par(mfrow = c(1, 1))
+
+# Densities notlog
+par(mfrow = c(3, 4))
+for(i in 1:ns) {
+  # i = 9
+  tmp <- stable_list[[i]]$size * 0.09
+  dist_cont <- tmp[tmp > 0.09]
+  sort(dist_cont, decreasing = T) |> summary()
+  sort(dist_cont, decreasing = T)[-1] |> summary()
+
+  dsim <- density(dist_cont, from = lower, n = 2 ^ 11)
+  dobs <- density(10 ^ ref_cont, from = lower, n = 2 ^ 11)
+
+  yy <- range(c(dsim$y, dobs$y)) * 1.05
+  xx <- range(c(dsim$x, dobs$x))
+
+  plot(dsim, col = "blue", ylim = yy, xlim = xx,
+       main = comptab$shift[i], xlab = "fire size (ha)")
+  lines(dobs, col = "black")
+}
+par(mfrow = c(1, 1))
+
+
+# Barplots
+par(mfrow = c(3, 4))
+for(i in 1:ns) {
+  # i = 1
+  dist_cat <- size_dist(stable_list[[i]]$size * 0.09)[-1] |> normalize()# pixels to ha
+  barplot(dist_cat, col = "blue",
+          main = comptab$shift[i], xlab = "fire size class")
+  barplot(ref_cat, col = rgb(0, 0, 0, 0.4), add = T)
+}
+par(mfrow = c(1, 1))
+
+
+
+# Ideas: ------------------------------------------------------------------
+
+# Comparar la distribución únicamente usando los fuegos > 0.09 ha (1 pix).
+# Opciones:
+#   (1) Tunear el intercept sólo en base a eso, dejando como no quemado los
+#       píxeles afectados por ese tipo de ignición.
+#       Luego calcular la tasa efectiva de escape, como la proporción de incendios
+#       simulados que salen de 1 pix. Para corregir el nro de incendios,
+#       simular
+#   (2) Simular steps de una normal truncada en log(2), para que nunca simule
+#       menos de un pixel.
+#       Pero esto no lo va a resolver. Demasiadas igniciones ocurren con
+#       steps altos que de todos modos no superan el pixel.
+
+
+
+# Calcular burn probability en el paisaje ---------------------------------
+
+# Import full simulations
+
+# Load shift = 0
+ff <- list.files(export_dir, pattern = "sim_02_")
+sims0 <- do.call("c", lapply(1:length(ff), function(i) {
+  readRDS(file.path(export_dir, ff[i]))
+}))
+
+# Load shift = -4.512744
+ff <- list.files(export_dir, pattern = "sim_03_")
+sims_minshift <- do.call("c", lapply(1:length(ff), function(i) {
+  readRDS(file.path(export_dir, ff[i]))
+}))
+
+# All (12)
+shiftvals <- c(
+  seq(-4.512744, -4.512744/2, length.out = 9)[1:8],
+  seq(-4.512744/2, 0, length.out = 4)
+)
+ns <- length(shiftvals)
+
+simlist <- vector("list", ns)
+simlist[[1]] <- sims_minshift   # starts from most negative shift
+simlist[[ns]] <- sims0          # zero shift
+
+for(i in 2:(ns-1)) {
+  num <- str_pad(i+2, 2, pad = "0") # starting at file id number 4
+  nn <- paste("sim_", num, "_00.rds", sep = "")
+  x <- readRDS(file.path(export_dir, nn))
+  simlist[[i]] <- x
+}
+
+nsim <- length(simlist[[1]])
+rprob_list <- vector("list", ns)
+prob_means <- numeric(ns)
+for(i in 1:ns) {
+  i = 12
+  print(i)
+  bp <- matrix(0, nrow(pnnh_land), ncol(pnnh_land))
+
+  # set non-burnable as -1
+  bp[pnnh_land[, , "veg"] == 99] <- NA
+
+  # add 1 in burned pixels
+  for(y in 1:nsim) {
+    print(y)
+    # i = 1; y = 1
+    nf <- simlist[[i]][[y]]$burned_ids_list |> length() # number of fires that year
+    if(nf < 1) next
+    for(f in 1:nf) {
+      # f = 1
+      idsmat <- simlist[[i]][[y]]$burned_ids_list[[f]]
+      for(cell in 1:ncol(idsmat)) {
+        bp[idsmat[1, cell], idsmat[2, cell]] <- bp[idsmat[1, cell], idsmat[2, cell]] + 1
+      }
+    }
+  }
+
+  # divide by nsim (years) to get annual prob
+  bp <- bp / nsim
+  r <- rast_from_mat(bp, pnnh_land_rast)
+  r <- mask(r, pnnh)
+  rprob_list[[i]] <- r
+  prob_means[i] <- mean(values(r), na.rm =T)
+}
+
+rprob <- do.call("c", rprob_list)
+plot(rprob)
