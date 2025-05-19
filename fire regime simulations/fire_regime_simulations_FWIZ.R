@@ -841,11 +841,6 @@ nlags <- 10
 
 # Spatial data ------------------------------------------------------------
 
-# Nahuel Huapi National Park (strict)
-pnnh <- vect(file.path("data", "protected_areas", "apn_limites.shp"))
-pnnh <- pnnh[pnnh$nombre == "Nahuel Huapi", ]
-pnnh <- project(pnnh, "EPSG:5343")
-
 # Buffer around PNNH (10 km buffer, to simulate ignitions; posgar 2007)
 pnnh_buff <- vect(file.path("data", "protected_areas", "pnnh_buff_10000.shp"))
 
@@ -1465,8 +1460,125 @@ for(i in 6:8) lines(density(vlist[[i]]), col = i)
 lines(density(values(fwi_modern)), lwd = 1, lty = 2)
 
 
-# Tareas ---------------------------------------------------------------
 
-# Dibujar mapas lindos: 
-#   burn prob de modelos separados, 
-#   burn prob de escenarios simulados,
+# Lightning-burned proportion in the whole area ---------------------------
+
+filenames <- list.files(export_dir, pattern = "frs")
+ftab <- data.frame(filename = filenames)
+ftab$decade <- factor("2040", levels = c("2040", "2090", "modern"))
+ftab$scenario <- factor("ssp585", levels = c(scenarios, "modern"))
+
+scdec <- expand.grid(
+  scenario = factor(scenarios, levels = c(scenarios, "modern")), 
+  decade = factor(decades, levels = c(decades, "modern"))
+)
+scdec$scdec <- paste(scdec$decade, scdec$scenario, sep = "_")
+ncomb <- nrow(scdec)
+
+ftab$decade[grep("modern", filenames)] <- "modern"
+ftab$scenario[grep("modern", filenames)] <- "modern"
+
+for(i in 1:ncomb) {
+  rows <- grep(scdec$scdec[i], filenames)
+  ftab$decade[rows] <- scdec$decade[i]
+  ftab$scenario[rows] <- scdec$scenario[i]
+}
+
+nsim <- 2000
+nexp <- ncomb + 1
+
+exp_names <- c("modern", scdec$scdec)
+
+# Loop over experiments (scenarios * decades + modern = 9)
+for(e in 1:nexp) {
+  message(paste(e, "------------------------------"))
+  
+  if(e == 1) {
+    fn <- ftab$filename[ftab$decade == "modern"]
+  } else {
+    rows <- 
+      ftab$decade == scdec$decade[e-1] & 
+      ftab$scenario == scdec$scenario[e-1]
+    fn <- ftab$filename[rows]
+  }
+  
+  table_out <- matrix(0, nsim, 3)
+  colnames(table_out) <- c("burned_count", "light_count", "light_prop")
+  
+  iter <- 0
+  
+  # Loop sobre los archivos de simulación
+  for (f in 1:length(fn)) {
+    message(paste("file", f))
+    
+    # Leer simulaciones
+    sims <- readRDS(file.path(export_dir, fn[f]))
+    sims <- sims[sapply(sims, function(x) !is.null(x))]
+    ns <- length(sims)
+    
+    # Loop sobre los años simulados
+    for (s in 1:ns) {
+      # Verificar si hubo incendios
+      if (length(sims[[s]]$burned_ids_list) == 0) next
+      
+      sizetable <- sims[[s]]$size_fwi_table
+      
+      table_out[s+iter, "burned_count"] <- 
+        sum(sizetable$size)
+      table_out[s+iter, "light_count"] <- 
+        sum(sizetable$size[sizetable$cause == "lightning"])
+    }
+    
+    iter <- ns + iter
+  }
+  
+  table_out[, "light_prop"] <- table_out[, "light_count"] / table_out[, "burned_count"]
+  
+  nnvec <- paste("lightning_proportion", "-", exp_names[e], ".rds", sep = "")
+  saveRDS(table_out, file.path(export_dir, nnvec))
+}
+
+## Load computed tables
+vecnames <- list.files(export_dir, "lightning_proportion")
+vecnames <- c(vecnames[9], vecnames[1:8])
+
+ne <- length(vecnames)
+
+levs <- c("modern_modern", 
+          "2040_ssp126", "2040_ssp245", "2040_ssp370", "2040_ssp585",
+          "2090_ssp126", "2090_ssp245", "2090_ssp370", "2090_ssp585")
+
+tables <- do.call("rbind", lapply(1:ne, function(i) {
+  readRDS(file.path(export_dir, vecnames[i])) 
+})) |> as.data.frame()
+
+tables$experiment <- factor(rep(levs, each = nsim), levels = levs)
+
+(bag <- aggregate(light_prop * 100 ~ experiment, tables, mean))
+# very similar to the result inside the pnnh.
+# So the low lightining abundance is not caused by the large elevation 
+# effect on lightning. in fact, the effect of elevation is not that much
+# larger for lightning than for humans.
+
+tab_export <- tidyr::separate(tables, which(names(tables) == "experiment"), 
+                              into = c("decade", "scenario"), 
+                              sep = "_", remove = F)
+head(tab_export)
+
+saveRDS(tab_export, file.path("files", "fire_regime_simulation_FWIZ",
+                              "lightning_proportion_merged.rds"))
+
+# Lightning proportion in pnnh vs buffer -------------------------------
+
+tab_buff <- readRDS(file.path("files", "fire_regime_simulation_FWIZ",
+                              "lightning_proportion_merged.rds"))
+tab_pnnh <- readRDS(file.path("files", "fire_regime_simulation_FWIZ",
+                              "burn_prop_distribution_merged.rds"))
+
+(ag_buff <- aggregate(light_prop * 100 ~ experiment, tab_buff, mean))
+(ag_pnnh <- aggregate(light_prop * 100 ~ experiment, tab_pnnh, mean))
+colnames(ag_buff) <- colnames(ag_pnnh) <- c("experiment", "light_perc")
+
+plot(ag_pnnh$light_perc ~ ag_buff$light_perc,
+     xlim = c(10, 50), ylim = c(10, 50), pch = 19)
+abline(0, 1)

@@ -6,6 +6,7 @@ library(viridis)
 library(patchwork)
 library(brms)
 library(bayestestR) # hdi interval
+library(DHARMa)
 
 library(extrafont)
 # extrafont::font_import()
@@ -668,6 +669,14 @@ ggsave("fire regime simulations/figures/burn_prob_2090.png",
 
 # Burned proportion in PNNH and lightning-burned proportion ---------------
 
+theme_set(theme_classic()) # for non maps
+
+exp_names <- c("1999-2022",
+               "2040-2049 SSP1 2.6", "2040-2049 SSP2 4.5",
+               "2040-2049 SSP3 7.0", "2040-2049 SSP5 8.5",
+               "2090-2099 SSP1 2.6", "2090-2099 SSP2 4.5",
+               "2090-2099 SSP3 7.0", "2090-2099 SSP5 8.5")
+
 exp_names2 <- c("2040-2049 SSP1 2.6", "2040-2049 SSP2 4.5",
                 "2040-2049 SSP3 7.0", "2040-2049 SSP5 8.5",
                 "2090-2099 SSP1 2.6", "2090-2099 SSP2 4.5",
@@ -732,14 +741,14 @@ bprop <- cbind(
   ske,
   apply(pfit_samples, 1, hdmean, name = "p") |> t() |> as.data.frame()
 )
-bprop$response <- "Proporción quemada anual (%)"
 
 ww <- 0.9
+p1 <- 
 ggplot(bprop, aes(x = period, y = p_mean, ymin = p_lower, ymax = p_upper,
                   color = scenario, fill = scenario)) +
   geom_bar(stat = "identity", 
            position = position_dodge2(width = ww, preserve = "single"),
-           size = 0.3, alpha = 0.6, width = ww) +
+           linewidth = 0.3, alpha = 0.6, width = ww) +
   geom_linerange(position = position_dodge2(width = ww, preserve = "single")) +
   scale_color_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático") +
   scale_fill_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático",
@@ -747,20 +756,22 @@ ggplot(bprop, aes(x = period, y = p_mean, ymin = p_lower, ymax = p_upper,
   xlab("Período") + 
   ylab("Proporción quemada anual (%)") +
   scale_y_continuous(expand = c(0, 0),
-                     breaks = seq(0, 3, 0.5)) +
+                     breaks = seq(0, 3, 1)) +
   nice_theme() +
-  theme(panel.grid.major.y = element_line(linewidth = 0.25, color = "gray80"))
+  theme(panel.grid.major.y = element_line(linewidth = 0.25, color = "gray80"),
+        plot.tag.position = c(0.14, 0.95)) +
+  labs(tag = "A")
+p1
 
+# ggsave("fire regime simulations/figures/burn_prob_mean_comparison.pdf",
+#        plot = last_plot(),
+#        width = 14, height = 8, units = "cm")
+# ggsave("fire regime simulations/figures/burn_prob_mean_comparison.png",
+#        plot = last_plot(),
+#        width = 14, height = 8, units = "cm", bg = "white")
 
-ggsave("fire regime simulations/figures/burn_prob_mean_comparison.pdf",
-       plot = last_plot(), 
-       width = 14, height = 8, units = "cm")
-ggsave("fire regime simulations/figures/burn_prob_mean_comparison.png",
-       plot = last_plot(), 
-       width = 14, height = 8, units = "cm", bg = "white")
-
-write.csv(bprop, "fire regime simulations/figures/burn_prob_means.csv", 
-          row.names = F)
+# write.csv(bprop, "fire regime simulations/figures/burn_prob_means.csv", 
+#           row.names = F)
 
 
 # Lightning
@@ -769,49 +780,172 @@ lprop <- cbind(
   ske,
   apply(lfit_samples, 1, hdmean, name = "p") |> t() |> as.data.frame()
 )
-lprop$response <- "Fracción quemada por rayos (%)"
-
-ggplot(lprop, aes(x = scenario, y = p_mean, ymin = p_lower, ymax = p_upper,
-                  color = period, fill = period, shape = period)) +
-  geom_linerange() +
-  geom_point(size = 3, alpha = 0.2) +
-  ylab("Fracción quemada por rayos (%)") + 
-  xlab("Escenario climático")
 
 
-# BOTH
-
-both_prop <- rbind(bprop, lprop)
-both_prop$response <- factor(
-  both_prop$response,
-  levels = c("Proporción quemada anual (%)",
-             "Fracción quemada por rayos (%)"),
-  labels = c("A. Proporción quemada anual (%)",
-             "B. Fracción quemada por rayos (%)")
-)
-
-ww <- 0.8
-ggplot(both_prop, aes(x = period, y = p_mean, ymin = p_lower, ymax = p_upper,
-                      color = scenario, fill = scenario)) +
+p2 <- 
+ggplot(lprop, aes(x = period, y = p_mean, ymin = p_lower, ymax = p_upper,
+                  color = scenario, fill = scenario)) +
   geom_bar(stat = "identity", 
            position = position_dodge2(width = ww, preserve = "single"),
-           size = 0.3, alpha = 0.6, width = ww) +
+           linewidth = 0.3, alpha = 0.6, width = ww) +
   geom_linerange(position = position_dodge2(width = ww, preserve = "single")) +
   scale_color_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático") +
   scale_fill_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático",
                      alpha = 0.5) + 
   xlab("Período") + 
-  facet_wrap(vars(response), nrow = 2, axes = "all", strip.position = "left",
-             axis.labels = "margins", scales = "free_y") +
-  scale_y_continuous(expand = c(0, 0)) +
-  theme(axis.title.y = element_blank(),
-        strip.placement = "outside",
-        panel.spacing.y = unit(4, "mm")) +
-  nice_theme()
+  ylab("Proporción quemada por rayos (%)") +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 45),
+                     breaks = seq(0, 40, 10)) +
+  nice_theme() +
+  theme(panel.grid.major.y = element_line(linewidth = 0.25, color = "gray80"),
+        plot.tag.position = c(0.14, 0.95)) +
+  labs(tag = "B")
+p2
+
+# BOTH plots
+pboth <- (p1 + theme(axis.text.x = element_blank(),
+                     axis.title.x = element_blank()) +
+          p2) + plot_layout(nrow = 2, guides = "collect")
+pboth
+
+ggsave("fire regime simulations/figures/burn_prob_light_mean_comparison.pdf",
+       plot = last_plot(),
+       width = 14, height = 13, units = "cm")
+ggsave("fire regime simulations/figures/burn_prob_light_mean_comparison.png",
+       plot = last_plot(),
+       width = 14, height = 13, units = "cm", bg = "white")
+
+
+## Make the same in table format
+
+qb_samples <- t(t(pfit_samples) / pfit_samples[1, , drop = T])
+ql_samples <- t(t(lfit_samples) / lfit_samples[1, , drop = T])
+
+qb_summ <- apply(qb_samples, 1, hdmean, name = "qb") |> t()
+ql_summ <- apply(ql_samples, 1, hdmean, name = "ql") |> t()
+
+
+round_paste <- function(d, rr = 2) {
+  # d = qb_summ; rr = 2
+  dr <- round(d, rr)
+  
+  col_mean <- grep("mean", colnames(d))
+  col_lower <- grep("_lower", colnames(d))
+  col_upper <- grep("_upper", colnames(d))
+  
+  res <- paste(dr[, col_mean], 
+               " [", dr[, col_lower], "; ", 
+               dr[, col_upper], "]", 
+               sep = "")
+  
+  return(res)
+}
+
+
+table_out <- data.frame(
+  Periodo = ske$period,
+  Escenario = ske$scenario,
+  prop_quem = round_paste(apply(pfit_samples, 1, hdmean, name = "p") |> t()),
+  prop_quem_q = round_paste(qb_summ),
+  prop_rayos = round_paste(apply(lfit_samples, 1, hdmean, name = "p") |> t()),
+  prop_rayos_q = round_paste(ql_summ)
+)
+
+latex_table <- knitr::kable(table_out, format = "latex", booktabs = TRUE)
 
 
 
+# Assess burned proportion distribution (dharma) --------------------------
 
-# TAREAS ------------------------------------------------------------------
+bcount_sim <- predict(bprop_model, summary = F) |> t()
+lcount_sim <- predict(lprop_model, summary = F) |> t()
 
-# volver a correr los mapas
+bp_res <- createDHARMa(bcount_sim, tab$burned_count, integerResponse = T)
+lp_res <- createDHARMa(lcount_sim, tab$light_count[tab$burned_count > 0], 
+                       integerResponse = T)
+
+plotResiduals(bp_res, form = tab$experiment)
+plotResiduals(lp_res, form = tab$experiment[tab$burned_count > 0])
+# Subestima un poco las colas, mejor usar percentiles crudos.
+
+# edit tab for plotting
+
+tab2 <- tab
+tab2$experiment <- factor(tab$experiment, levels = levels(tab$experiment),
+                          labels = exp_names)
+tab2$scenario <- factor(tab$scenario, 
+                        levels = c("modern","ssp126","ssp245","ssp370","ssp585"),
+                        labels = c("Moderno", "SSP1-2.6", "SSP2-4.5",
+                                              "SSP3-7.0", "SSP5-8.5"))
+tab2$decade <- factor(tab$decade, levels = unique(tab$decade),
+                      labels =  c("1999-2022", "2040-2049", "2090-2099"))
+
+
+# Get burned proportion
+
+
+ggplot(tab2, aes(x = burned_prop, color = scenario, fill = scenario)) +
+  geom_density() +
+  scale_color_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático") +
+  scale_fill_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático",
+                     alpha = 0.5) + 
+  facet_wrap(vars(decade), nrow = 1) +
+  xlab("Proporción quemada (%)") + 
+  ylab("Proporción quemada por rayos (%)") +
+  nice_theme() +
+  theme(panel.grid.major.y = element_line(linewidth = 0.25, color = "gray80"))
+
+aggregate(burned_prop * 100 ~ decade + scenario, tab2, quantile, 
+          probs = seq(0.1, 0.9, by = 0.1), method = 8)
+
+
+plot(ecdf(tab2$burned_prop[tab2$experiment == "2090-2099 SSP5 8.5"]))
+lines(ecdf(tab2$burned_prop[tab2$experiment == "1999-2022"]), col = 2)
+
+
+ecdf_out <- function(x) {
+  ECDF <- ecdf(x)
+  return(data.frame(cdf = ECDF(x), x = x))
+}
+
+tab3 <- tab2
+tab3$burned_perc <- tab$burned_prop * 100
+tab3$cdf <- NA
+
+for(e in levels(tab3$experiment)) {
+  rows <- tab3$experiment == e  
+  ECDF <- ecdf(tab3$burned_perc[rows])
+  tab3$cdf[rows] <- ECDF(tab3$burned_perc[rows])
+}
+
+p3 <-
+ggplot(tab3, aes(x = burned_perc, y = cdf, color = scenario, fill = scenario)) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", linewidth = 0.1) +
+  geom_line() +
+  scale_color_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático") +
+  scale_fill_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático",
+                     alpha = 0.5) + 
+  facet_wrap(vars(decade), nrow = 1, axes = "all",
+             axis.labels = "margins") +
+  #ylab("Probabilidad acumulada\n[Pr(X<=x)]") +
+  ylab(expression(atop("Probabilidad acumulada", "[Pr(X" <= "x)]"))) +
+  xlab("Proporción quemada anual (%)") +
+  scale_y_continuous(breaks = seq(0, 1, 0.2),
+                     limits = c(0, 1.02), expand = c(0.001, 0.001)) +
+  nice_theme() +
+  theme(panel.grid.major.y = element_line(linewidth = 0.25, color = "gray80"))
+p3
+
+ggsave("fire regime simulations/figures/burn_prob_cdf.pdf",
+       plot = last_plot(),
+       width = 14, height = 6, units = "cm")
+ggsave("fire regime simulations/figures/burn_prob_cdf.png",
+       plot = p3,
+       width = 14, height = 6, units = "cm", bg = "white")
+
+# table
+tab_perc <- aggregate(burned_perc ~ scenario + decade, tab3, quantile, 
+                      probs = seq(0, 1, by = 0.05), method = 8)
+write.csv(tab_perc,
+          "fire regime simulations/figures/burn_prob_quantiles.csv", 
+          row.names = F)

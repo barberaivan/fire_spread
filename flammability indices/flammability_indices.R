@@ -409,3 +409,39 @@ See <flammability_indices.R> for details."
 
 saveRDS(theta_hat, file.path("data", "flammability indices",
                              "flammability_indices.rds"))
+
+
+
+# NDVI model --------------------------------------------------------------
+
+# Used to get the NDVI of each veg type at the same elevation and northing,
+# which is useful to compare spread probability among vegetation types.
+
+dfit$ndvi01 <- (as.numeric(dfit$ndvi_dt) + 1) / 2
+
+ndvi_model <- bam(
+  ndvi01 ~
+    vegfac2 + 
+    s(elevation, by = vegfac2, k = 4, id = "a") + 
+    s(northing, by = vegfac2, k = 4, id = "b") +
+    s(slope, by = vegfac2, k = 4, id = "c"),
+  family = betar(), data = dfit, method = "REML"
+)
+
+saveRDS(ndvi_model, file.path("files", "landscape_flammability",
+                              "ndvi_model_01.rds"))
+
+plot(ndvi_model)
+
+nd <- expand.grid(
+  vegfac2 = factor(levels(dfit$vegfac2), levels = levels(dfit$vegfac2)),
+  elevation = 900,
+  northing = 0,
+  slope = 10
+)
+
+nd$ndvi_mean <- predict(ndvi_model, nd, "response") * 2 - 1
+
+write.csv(nd, file.path("files", "landscape_flammability", 
+                        "ndvi_mean_by_veg_type.csv"),
+          row.names = F)

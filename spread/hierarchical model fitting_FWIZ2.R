@@ -6,6 +6,7 @@
 library(tidyverse)
 library(viridis)
 library(deeptime)
+library(patchwork)
 theme_set(theme_bw())
 
 library(bayesplot)
@@ -124,15 +125,6 @@ invlogit_scaled2 <- function(x, L, U) {
     return(plogis(x) * (U - L) + L)
   }
 }
-
-# FUNCTIONS TO REPLACE ----------------------------------------------------
-
-# constrain  for     invlogit_scaled
-# constrain_vec for  invlogit_scaled
-
-# logit_scaled 
-# logit_scaledv
-# invlogit_scaledv   not used
 
 # invlogit_scaled is in the mcmc_functions and used in mcmc();
 # invlogit_scaled2 is more general, used to compute predictions.
@@ -2067,6 +2059,15 @@ fwi_ref <- quantile(fwi_all, prob = c(0.025, 0.5, 0.975), method = 8)
 fwi_ref[2] <- 0
 fwi_ref_text <- as.character(round(fwi_ref, 3))
 
+# FWI is standardized with respect to fires data; but it was originally 
+# standardized at the pixel level, taking much smaller values.
+# Get it at the original scale, to show in plots:
+fwi_original <- fwi_ref * fwi_sd + fwi_mean
+round(fwi_original, 3)
+# These are the actual values used:
+# 2.5%    mean  97.5% 
+# -0.597  0.864  2.377
+
 Xfwi <- cbind(rep(1, 3), fwi_ref)
 npred_mu <- length(fwi_ref)
 
@@ -2642,8 +2643,6 @@ ggsave("spread/figures_FWIZ2/overlap_fit_sim.pdf",
        width = 9, height = 12, units = "cm")
 
 
-# hacer plot de overlap igual al de size ----------------------------------
-
 
 
 # Dharma for size ______________________
@@ -2779,3 +2778,255 @@ ggplot(qsumm_log, aes(fire_id, mean, ymin = hdi_lower_95, ymax = hdi_upper_95)) 
   ylab("Simulated / observed fire size") +
   xlab("Fire ID (increasing size)") +
   nice_theme()
+
+
+# Vegetation effect on spread prob as a function of FWI --------------------
+
+# Recipe for the analysis.
+
+# Get fixed TFI (elevation = elev_fixed; northing = 0).
+# Sample slope and windspeed in the PNNH, N = 500.
+
+# Using slope values from the sample, elevation fixed and northing fixed, 
+# estimate the NDVI for all points by veg type. 
+# Compute the NDVI.
+
+# Duplicate the sample to make slope = 0 (downhill). Hence, this will represent
+# an average between downhill and uphill effects. 
+
+# For each veg type, 
+
+# Compute TFI at elevation = elev_fixed, northing = 0
+
+# For a sequence of FWI, do the following:
+#   For each posterior sample
+
+(fwiqs <- quantile(fwi_all, prob = seq(0.025, 0.975, length.out = 20),
+                   method = 8))
+fwiseq <- sort(c(0, median(fwi_all), fwiqs))
+plot(fwiseq)
+
+# Get slope and windspeed at the PNNH
+pnnh_land_rast <- rast(file.path("data", "pnnh_images",
+                                 "pnnh_data_spread_buffered_30m.tif"))
+# Nahuel Huapi National Park (strict)
+pnnh <- vect(file.path("data", "protected_areas", "apn_limites.shp"))
+pnnh <- pnnh[pnnh$nombre == "Nahuel Huapi", ]
+pnnh <- project(pnnh, "EPSG:5343")
+
+pnnh_sample <- spatSample(pnnh_land_rast, size = 2000, method = "regular", 
+                          as.points = T, values = T)
+keep1 <- relate(pnnh_sample, pnnh, "intersects")
+pnnh_sample1 <- pnnh_sample[keep1, ]
+pnnh_sample2 <- pnnh_sample1[pnnh_sample1$veg < 7, ] # keep only burnable and focal vegs
+set.seed(2345)
+pnnh_sample3 <- pnnh_sample2[sample(1:nrow(pnnh_sample2), size = 500, replace = F), ]
+
+# get coordinates to get rowcol and then, windspeed
+sampled_crds <- crds(pnnh_sample3)
+sampled_cells <- cellFromXY(pnnh_land_rast, sampled_crds)
+# sampled_rowcols <- rowColFromCell(pnnh_rast_full, sampled_cells)
+
+# get spread landscape for PNNH
+pnnh_land <- readRDS(file.path("data", "pnnh_images",
+                               "pnnh_spread_landscape_urban-nonburnable.rds"))
+# import rast_from_mat
+source(file.path("..", "FireSpread", "tests", "testthat", "R_spread_functions.R"))
+wind_rast <- rast_from_mat(pnnh_land[, , "wspeed"], pnnh_land_rast$ndvi)
+
+# Extract wind and slope
+sw_vals <- cbind(values(pnnh_land_rast$slope), values(wind_rast))[sampled_cells, ]
+colnames(sw_vals) <- c("slope", "wspeed")
+
+# Compute slope term from angle
+sw_terms <- sw_vals 
+sw_terms[, "slope"] <- sin(sw_vals[, "slope"] * pi / 180)
+sw_terms_t <- t(sw_terms)
+# plot(sw_terms[, "slope"] ~ sw_vals[, "slope"]) # OK
+
+# duplicate sw_terms, with zero slope
+sw_dup <- sw_terms
+sw_dup[, "slope"] <- 0
+
+sw_data <- rbind(sw_terms, sw_dup) # wind is already standardized
+sw_data_t <- t(sw_data)
+
+Xfwi <- cbind(rep(1, length(fwiseq)), fwiseq)
+
+# Get VFI for each vegetation type
+
+nd <- expand.grid(elevation = 900, northing = 0,
+                  slope = sw_vals[, "slope"],
+                  vegfac2 = factor(veg_levels, levels = veg_levels))
+
+ndvi_model <- readRDS(file.path("files", "landscape_flammability", 
+                                "ndvi_model_01.rds"))
+nd$ndvi01 <- predict(ndvi_model, nd, "response") |> as.numeric()
+nd$ndvi <- nd$ndvi01 * 2 - 1 # scale to [-1, 1] 
+nd$vfi <- vfi_calc(nd$vegfac2, nd$ndvi)
+
+
+vfimat <- matrix(nd$vfi, 500, 5) |> t() # veg types in rows
+tfi_fixed <- tfi_calc(900, 90, 0)
+
+## Array to fill
+spreadprobs <- array(
+  NA, dim = c(length(fwiseq), n_veg, npost),
+  dimnames = list(
+    "fwi" = fwiseq,
+    "vegetation" = veg_data$vegfac2,
+    "iteration" = 1:npost
+  )
+)
+
+nr <- 200 # random effects draws
+ranef_raw <- matrix(rnorm(nr * 5), nr, 5)
+nc <- 5 # spread coefficients
+nf <- length(fwiseq)
+
+# matrices to fill in the loop
+ranef_unc <- matrix(NA, nr, 5)
+colnames(ranef_unc) <- par_names[1:5]
+ranef <- ranef_unc
+
+## WARNING: heavy loop
+for(i in 1:npost) {
+  print(i)
+  
+  # mu at unconstrained scale
+  mumat <- Xfwi %*% t(draws$fixef[1:(n_coef-1), 1:2, i])
+  
+  # Compute choleski factor of vcov matrix for random effects
+  sds <- draws$fixef[1:(n_coef-1), "s2", i] |> sqrt()
+  rho <- draws$rho[1:(n_coef-1), 1:(n_coef-1), i]
+  V <- diag(sds) %*% rho %*% diag(sds)
+  Vchol_U <- chol(V)
+  
+  # unconstrained centred random effects
+  ranef_centred <- ranef_raw %*% Vchol_U
+  
+  # Loop over fwi values (rows in mumat)
+  for(f in 1:nf) {
+    # unconstrained random effects
+    ranef_unc[] <- ranef_centred + outer(rep(1, nr), mumat[f, ])
+    
+    # constrained random effects 
+    ranef[] <- invlogit_scaled2(ranef_unc, params_lower[1:nc], params_upper[1:nc])
+    
+    # Compute terms of the linear predictor
+    tfi_term <- ranef[, "tfi"] * tfi_fixed
+    wind_term <- ranef[, "wind"] %*% sw_terms_t["wspeed", , drop = F]
+    slope_term <- ranef[, "slope"] %*% sw_terms_t["slope", , drop = F]
+    
+    lp_downhill <- ranef[, "intercept"] + tfi_term + wind_term # no slope
+    lp_uphill <- lp_downhill + slope_term
+    
+    # Loop over vegetation types
+    for(v in 1:n_veg) {
+      vfi_local <- ranef[, "vfi"] %*% vfimat[v, , drop = F]
+      
+      prob_downhill <- mean(plogis(vfi_local + lp_downhill))
+      prob_uphill <- mean(plogis(vfi_local + lp_uphill))
+      
+      spreadprobs[f, v, i] <- mean(c(prob_downhill, prob_uphill))
+    }
+    
+  }
+}
+
+saveRDS(spreadprobs, file.path("files", "hierarchical_model",
+                               "spreadprob_veg_comparison_array.rds"))
+spreadprobs <- readRDS(file.path("files", "hierarchical_model",
+                                 "spreadprob_veg_comparison_array.rds"))
+
+mad2 <- function(x) mean(abs(x - mean(x)))
+
+# compute absolute difference among veg types
+mad_ <- apply(spreadprobs, c(1, 3), mad2)
+madsumm <- apply(mad_, 1, summarise) |> t() |> as.data.frame()
+madsumm$fwiseq <- fwiseq
+madsumm$fwi <- fwiseq * fwi_sd + fwi_mean
+
+(
+  p1 <-
+    ggplot(madsumm, aes(x = fwi, y = mean, 
+                        ymin = hdi_lower_95, ymax = hdi_upper_95)) + 
+    geom_ribbon(color = NA, alpha = 0.2) +
+    geom_line() + 
+    ylab("Efecto de la vegetación (%)") + 
+    xlab("Fire Weather Index (anomalía)") +
+    annotate("text", x = -0.57, y = 0.099, label = "A", size = 12/.pt, 
+             fontface = "plain", hjust = 0, vjust = 1) +
+    scale_y_continuous(expand = c(1e-5, 1e-5), limits = c(0, 0.1),
+                       labels = function(x) x * 100) +
+    nice_theme()
+)
+
+# summarise posterior by veg type and fwi
+psumm_ <- apply(spreadprobs, 1:2, summarise)
+names(dimnames(psumm_))[1] <- "summary"
+psumm_long <- as.data.frame.table(psumm_, responseName = "prob")
+psumm <- pivot_wider(psumm_long, names_from = "summary", values_from = "prob")
+psumm$fwiori <- as.numeric(as.character(psumm$fwi)) * fwi_sd + fwi_mean
+psumm$vegetation <- factor(psumm$vegetation, levels = veg_levels, 
+                           labels = c("Bosque húmedo", "Bosque subalpino",
+                                      "Bosque seco", "Matorral", "Pastizal"))
+
+(
+  p2 <-
+    ggplot(psumm, aes(x = fwiori, y = mean, 
+                      ymin = hdi_lower_95, ymax = hdi_upper_95,
+                      color = vegetation, fill = vegetation)) + 
+    geom_ribbon(color = NA, alpha = 0.2) +
+    geom_line() + 
+    scale_fill_viridis(discrete = T, begin = 0, end = 0.9, option = "D",
+                       name = "Tipo de\nvegetación") +
+    scale_color_viridis(discrete = T, begin = 0, end = 0.9, option = "D",
+                        name = "Tipo de\nvegetación") +
+    ylab("Probabilidad de propagación (%)") + 
+    xlab("Fire Weather Index (anomalía)") + 
+    theme(legend.position = "right", 
+          legend.title = element_blank()) +
+    annotate("text", x = -0.57, y = 0.99, label = "B", size = 12/.pt, 
+             fontface = "plain", hjust = 0, vjust = 1) +
+    nice_theme() +
+    scale_y_continuous(expand = c(1e-5, 1e-5), limits = c(0.3, 1),
+                       labels = function(x) x * 100)
+  
+)  
+
+
+# Edit p1
+p1_mod <- p1 + 
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank()) 
+
+# Combinar con patchwork
+(pboth <- (p1_mod + p2) + plot_layout(nrow = 2))
+
+
+ggsave("spread/figures_FWIZ2/vegetation_effects_fwi.png",
+       plot = pboth,
+       width = 13, height = 13, units = "cm")
+ggsave("spread/figures_FWIZ2/vegetation_effects_fwi.pdf",
+       plot = pboth,
+       width = 13, height = 13, units = "cm", bg = "white")
+
+
+
+# VFI by veg type ---------------------------------------------------------
+
+d <- read.csv("files/landscape_flammability/ndvi_mean_by_veg_type.csv")
+d$vfi <- vfi_calc(d$vegfac2, d$ndvi_mean)
+
+knitr::kable(d[, c("vegfac2", "ndvi_mean", "vfi")], "latex")
+
+
+dd <- expand.grid(elevation = c(500, 1000, 1500),
+                  aspect = c(0, 90, 180),
+                  slope = 10)
+dd$orientacion <- rep(c("N", "E/O", "S"))
+dd$tfi <- tfi_calc(dd$elevation, dd$aspect, dd$slope)
+
+knitr::kable(dd[, c("elevation", "orientacion", "tfi")], "latex")
+

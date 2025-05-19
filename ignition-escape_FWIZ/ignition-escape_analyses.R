@@ -1703,3 +1703,15 @@ pnnh_data_summary <- list(
 
 saveRDS(pnnh_data_summary, file.path("data", "pnnh_images",
                                      "pnnh_data_summary.rds"))
+
+
+
+# Lightning contribution to burned area -----------------------------------
+
+aggs <- aggregate(area ~ cause, ig2, sum)
+aggs$area[2] / sum(aggs$area) * 100
+# estimación conservativa: 46.82708 %
+# (asume que los unknown son humanos)
+
+# muchos grandes no se sabe la causa
+ig2[order(ig2$area, decreasing = T), c("area", "cause")]
