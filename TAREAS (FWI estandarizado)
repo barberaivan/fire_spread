@@ -81,3 +81,7 @@ hacia 24 km, bajado de GEE. Esto implica actualizar weather scripts before
 spread mcmc.
 
 
+2026-03-19 ------------------------------------------------
+
+Parece que los scripts de spread se llaman FWIZ2, pero los de igniciones y fire regime, sólo se llaman FWIZ en su versión más actualizada, que usa esas logísticas.
+

@@ -166,7 +166,7 @@ values(landscape_base) <- 0
 #______________________________
 
 # wind test
-wind_dir <- 180               # direction, in angles, from which the wind comes
+wind_dir <- 90               # direction, in angles, from which the wind comes
 lands_sub <- landscape_base
 lands_sub$wdir <- rep(wind_dir * pi / 180, ncell(lands_sub))
 lands_sub$wspeed <- 20

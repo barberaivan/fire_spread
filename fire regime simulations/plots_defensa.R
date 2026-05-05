@@ -1,0 +1,1147 @@
+library(terra)
+library(ggplot2)
+library(tidyterra)
+library(ggspatial)
+library(viridis)
+library(patchwork)
+library(brms)
+library(bayestestR) # hdi interval
+library(DHARMa)
+
+library(extrafont)
+# extrafont::font_import()
+
+theme_set(theme_classic()) # for non maps
+theme_set(theme_minimal()) # for maps
+
+# Figure size settings ----------------------------------------------------
+
+a4h <- 29.7
+a4w <- 21.0
+margins <- 2.5
+fig_width_max <- a4w - margins * 2
+fig_height_max <- a4h - margins * 2
+
+# Custom theme ------------------------------------------------------------
+
+nice_theme <- function() {
+  theme(
+    panel.border = element_blank(),
+    panel.grid = element_blank(),
+    
+    axis.line = element_line(linewidth = 0.3),
+    
+    axis.text = element_text(size = 9),
+    axis.title = element_text(size = 11),
+    
+    plot.title = element_text(size = 11),
+    
+    strip.text = element_text(size = 11),
+    strip.background = element_rect(fill = "white", color = "white")
+  )
+}
+
+map_theme <- function() {
+  theme(
+    panel.border = element_blank(),
+    panel.grid = element_blank(),
+    axis.line = element_blank(),
+    
+    axis.text = element_text(size = 12),
+    axis.title = element_blank(),
+    
+    plot.title = element_text(size = 16),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    
+    strip.text = element_text(size = 12),
+    strip.background = element_rect(fill = "white", color = "white")
+  )
+}
+
+
+# Functions to summarise ---------------------------------------------------
+
+hdi_lower <- function(x) {
+  samples <- as.numeric(x)
+  return(hdi(samples, ci = 0.95)[["CI_low"]])
+}
+
+hdi_upper <- function(x) {
+  samples <- as.numeric(x)
+  return(hdi(samples, ci = 0.95)[["CI_high"]])
+}
+
+hdmean <- function(x, ci = 0.95, name = "mu") {
+  ci <- hdi(x, ci = ci)
+  result <- c(mean(x), ci$CI_low, ci$CI_high)
+  names(result) <- paste(rep(name, 3), c("mean", "lower", "upper"), sep = "_")
+  result
+}
+
+# Load files --------------------------------------------------------------
+
+# Burn probability maps
+source_dir <- file.path("files", "fire_regime_simulation_FWIZ")
+files <- list.files(source_dir, pattern = glob2rx("*burn_prob*.tif*"))
+files <- c(files[9], files[1:8])
+
+rlist <- lapply(1:9, function(i) {
+  rast(file.path(source_dir, files[i]))
+})
+
+exp_names <- c("1999-2022",
+               "2040-2049 SSP1 2.6", "2040-2049 SSP2 4.5",
+               "2040-2049 SSP3 7.0", "2040-2049 SSP5 8.5",
+               "2090-2099 SSP1 2.6", "2090-2099 SSP2 4.5",
+               "2090-2099 SSP3 7.0", "2090-2099 SSP5 8.5")
+
+sc_names <- c("SSP1-2.6", "SSP2-4.5",
+              "SSP3-7.0", "SSP5-8.5")
+
+bmap <- do.call("c", rlist)
+bmap <- bmap * 100 # prob as percent
+names(bmap) <- exp_names
+
+# PNNH layer, with lakes and non-burnable
+pnnh_rast_full <- rast(file.path("data", "pnnh_images", "pnnh_data_30m_buff_10000_std.tif"))
+veg_map0 <- pnnh_rast_full$veg # 11 classes
+
+# vegetation transform data:
+dveg <- readxl::read_excel("/home/ivan/Insync/Mapa vegetación WWF - Lara et al. 1999/clases de vegetacion y equivalencias.xlsx",
+                           sheet = "Sheet2")
+
+# Aplica la reclasificación
+veg_map <- as.factor(veg_map0)
+
+# Convierte el raster reclasificado en un factor con etiquetas
+levels(veg_map) <- list(data.frame(
+  ID = 1:11, 
+  Class = c("Bosque húmedo", 
+            "Bosque subalpino", 
+            "Bosque subalpino",
+            "Bosque seco",
+            "Matorral",
+            "Pastizal",
+            "Plantación",
+            "Áreas urbanas",
+            "Lagos",
+            "Altoandino",
+            "Altoandino")
+))
+# plot(veg_map)
+
+bmap2 <- resample(bmap, veg_map)
+bmap3 <- mask(bmap2, veg_map0, maskvalue = 8:11) # necesita nros, use raw layer
+
+# Nahuel Huapi National Park (strict)
+pnnh <- vect(file.path("data", "protected_areas", "apn_limites.shp"))
+pnnh_latlong <- pnnh[pnnh$nombre == "Nahuel Huapi", ]
+pnnh <- project(pnnh_latlong, "EPSG:5343")
+
+# Buffer around PNNH (10 km buffer, to simulate ignitions; posgar 2007)
+pnnh_buff <- vect(file.path("data", "protected_areas", "pnnh_buff_10000.shp"))
+
+# PNNH map with predicted burn prob by model:
+burn_prob_raster <- rast(file.path("data", "pnnh_images", 
+                                   "pnnh_data_120m_buff_10000_ig-esc-spread-prob_FWIZ.tiff"))
+burn_prob_models <- burn_prob_raster[[c("igprob_h", "igprob_l", 
+                                        "escprob", "spreadprob")]] * 100
+
+
+
+# Load fires and ignition points
+fires <- vect("/home/ivan/Insync/patagonian_fires/patagonian_fires/patagonian_fires.shp")
+igpoints <- vect("/home/ivan/Insync/Fire spread modelling/ignition_data/ignition_points_pnnh_bari-kitzberger.shp")
+igpoints$Causa <- factor(igpoints$cause,
+                         levels = c("human", "lightning", "unknown"),
+                         labels = c("Humanos", "Rayos", "Desconocida"))
+
+fires_pnnh <- fires[relate(fires, pnnh_latlong, relation = "intersects")]
+fires_pnnh$Incendios <- "Quemado"
+# plot(pnnh_latlong)
+# plot(fires_pnnh, add = T, col = "green")
+# plot(igpoints, add = T, col = "red")
+
+# Data and predictors map --------------------------------------------------
+
+veg_map_burn <- mask(veg_map, veg_map0, maskvalue = 8:11)
+veg_map_unburn <- mask(veg_map, veg_map0, maskvalue = 8:11, inverse = T)
+ndvi_lay <- mask(pnnh_rast_full$ndvi, veg_map0, maskvalue = 8:11)
+elev_lyr <- mask(pnnh_rast_full$elevation,
+                 veg_map0, maskvalue = 9)
+
+dist_h_lyr <- mask(pnnh_rast_full$dist_humans, veg_map0, maskvalue = 8:11)
+dist_r_lyr <- mask(pnnh_rast_full$dist_roads, veg_map0, maskvalue = 8:11)
+values(dist_h_lyr) <- values(dist_h_lyr) / 1000
+values(dist_r_lyr) <- values(dist_r_lyr) / 1000
+
+# settings gráficos
+bp_vir <- "F"
+bp_begin <- 1
+bp_end <- 0.1
+bp_name <- "Probabilidad\nde quema (%)"
+maxcell <- 100000 * 2
+
+park_contour <- "black"
+park_lwd <- 0.2
+
+
+## National park with fires and points
+
+datamap <-  ggplot() +
+  
+  # National park
+  geom_spatvector(data = pnnh, fill = "white", color = park_contour, 
+                  linewidth = 0.4) + 
+  
+  # Fires
+  geom_spatvector(data = fires_pnnh, color = viridis(1, option = "C"),
+                  mapping = aes(fill = Incendios), linewidth = 0.1) + 
+  scale_fill_viridis(option = "C", discrete = T, name = "") +
+  
+  # Ignition points
+  geom_spatvector(data = igpoints, size = 4, stroke = 1,
+                  mapping = aes(color = Causa, shape = Causa)) +
+  scale_color_viridis(option = "C", discrete = T, begin = 0.3, end = 0.8,
+                      name = "Focos (causa)") +
+  scale_shape_manual(values = 21:23, name = "Focos (causa)") +
+  
+  scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  # edit coordinates format
+  coord_sf() +
+  map_theme() +
+  theme(panel.grid.major = element_line(linewidth = 0.1, color = "gray20"),
+        axis.ticks = element_line(linewidth = 0.1, color = "gray20")) +
+  ggspatial::annotation_scale(
+    location = "tr", height = unit(1.5, "mm"),
+    bar_cols = c("grey60", "white"),
+    text_col = "gray20",
+    text_cex = 1,
+    line_width = 0.4
+  ) +
+  annotation_north_arrow(
+    location = "tl", which_north = "true",  
+    style = north_arrow_orienteering(
+      line_width = 0.2,
+      line_col = "black",
+      fill = c("grey60", "white"),
+      text_col = "white",
+      text_family = "serif",
+      text_face = NULL,
+      text_size = 0,
+      text_angle = 0
+    ),
+    width = unit(6, "mm"),
+    height = unit(6, "mm")
+  )
+datamap
+
+ggsave(
+  "fire regime simulations/figures_defensa/data_map.png", bg = "white",
+  plot = datamap, width = 16, height = 18, units = "cm"
+)
+
+
+## Argentina MAP
+arg_sf <- rnaturalearth::ne_countries(scale = "large", country = "Argentina", 
+                                      returnclass = "sf")
+# Provinces (states) — filter to Argentina
+provinces <- rnaturalearth::ne_states(country = "Argentina", returnclass = "sf")
+
+# Plot
+arg_map <- ggplot() +
+  geom_sf(data = arg_sf, fill = "white", color = "gray40", linewidth = 0.4) +
+  geom_sf(data = provinces[1], fill = "NA", color = "gray60", linewidth = 0.2) +
+  geom_sf(data = pnnh, fill = "forestgreen", alpha = 1) +
+  scale_x_continuous(breaks = seq(-70, -60, by = 10), expand = c(0, 0),
+                     labels = function(x) sprintf("%+d°", x)) +
+  scale_y_continuous(breaks = seq(-25, -55, by = -10), expand = c(0, 0),
+                     labels = function(y) sprintf("%+d°", y)) +
+  coord_sf() +
+  map_theme() +
+  theme_minimal()
+arg_map
+
+ggsave(
+  "fire regime simulations/figures_defensa/argentina_map.png", bg = "white",
+  plot = arg_map, width = 9, height = 18, units = "cm"
+)
+
+## Vegetation map (burnable areas)
+
+veg_burn <- ggplot() +
+  
+  # Burn probability map
+  geom_spatraster(data = veg_map_burn, maxcell = maxcell) +
+  scale_fill_viridis(discrete = T, option = "D", 
+                     na.value = "transparent", na.translate = F,
+                     begin = 0, end = 1,
+                     name = "Vegetación") +
+  
+  # National park
+  geom_spatvector(data = pnnh, fill = NA, color = park_contour, 
+                  linewidth = 0.8) + 
+  
+  scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  # edit coordinates format
+  coord_sf() +
+  map_theme() +
+  theme(panel.grid = element_blank(),
+        axis.ticks = element_line(linewidth = 0.1, color = "gray20"))
+veg_burn
+
+## Vegetation map (non-burnable areas)
+
+veg_unburn <- ggplot() +
+  
+  # Burn probability map
+  geom_spatraster(data = veg_map_unburn, maxcell = maxcell * 2) +
+  scale_fill_manual(values = viridis(3, option = "E", begin = 0.15, end = 0.85)[c(3, 1, 2)],
+                    na.value = "transparent", na.translate = F,
+                    name = "Superficie\nno quemable") +
+  
+  # National park
+  geom_spatvector(data = pnnh, fill = NA, color = park_contour, 
+                  linewidth = 0.8) + 
+  
+  scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  # edit coordinates format
+  coord_sf() +
+  map_theme() +
+  theme(panel.grid = element_blank(),
+        axis.ticks.x = element_line(linewidth = 0.1, color = "gray20"),
+        axis.text.y = element_blank())
+veg_unburn
+
+vege_map <- (veg_burn + veg_unburn) + plot_layout(ncol = 2)
+
+ggsave("fire regime simulations/figures_defensa/map_vege.png",
+       plot = vege_map, bg = "white",
+       width = 28, height = 15, units = "cm")
+
+
+
+
+ndvimap <- ggplot() +
+  
+  # Burn probability map
+  geom_spatraster(data = ndvi_lay, maxcell = maxcell) +
+  scale_fill_viridis(option = "G", na.value = "transparent",
+                     begin = 0, end = 1, direction = -1,
+                     name = "NDVI") +
+  
+  # National park
+  geom_spatvector(data = pnnh, fill = NA, color = "white", 
+                  linewidth = 0.8) + 
+  
+  scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  # edit coordinates format
+  coord_sf() +
+  map_theme() +
+  theme(panel.grid = element_blank(),
+        axis.ticks = element_line(linewidth = 0.1, color = "gray20"))
+ndvimap
+
+elev <- ggplot() +
+  
+  # Burn probability map
+  geom_spatraster(data = elev_lyr, maxcell = maxcell) +
+  scale_fill_viridis(option = "A", na.value = "transparent",
+                     begin = 0, end = 1,
+                     name = "Altitud\n(m s.n.m.)") +
+  
+  # National park
+  geom_spatvector(data = pnnh, fill = NA, color = park_contour, 
+                  linewidth = 0.8) + 
+  
+  scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  # edit coordinates format
+  coord_sf() +
+  map_theme() +
+  theme(panel.grid = element_blank(),
+        axis.ticks.x = element_line(linewidth = 0.1, color = "gray20"),
+        axis.text.y = element_blank())
+elev 
+
+ndvi_elev <- (ndvimap + elev) + plot_layout(ncol = 2)
+
+ggsave("fire regime simulations/figures_defensa/map_ndvi_elev.png",
+       plot = ndvi_elev, bg = "white",
+       width = 28, height = 15, units = "cm")
+
+
+dr_map <- ggplot() +
+  
+  # Burn probability map
+  geom_spatraster(data = dist_r_lyr, maxcell = maxcell) +
+  scale_fill_viridis(option = "E", na.value = "transparent",
+                     begin = 0, end = 0.9, direction = -1,
+                     name = "Distancia a\ncaminos (km)") +
+  
+  # National park
+  geom_spatvector(data = pnnh, fill = NA, color = "black", 
+                  linewidth = 0.8) + 
+  
+  scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  # edit coordinates format
+  coord_sf() +
+  map_theme() +
+  theme(panel.grid = element_blank(),
+        axis.ticks = element_line(linewidth = 0.1, color = "gray20"))
+dr_map
+
+dh_map <- ggplot() +
+  
+  # Burn probability map
+  geom_spatraster(data = dist_h_lyr, maxcell = maxcell) +
+  scale_fill_viridis(option = "E", na.value = "transparent",
+                     begin = 0, end = 0.9, direction = -1,
+                     name = "Distancia a\npoblados (km)") +
+  
+  # National park
+  geom_spatvector(data = pnnh, fill = NA, color = "black", 
+                  linewidth = 0.8) + 
+  
+  scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  # edit coordinates format
+  coord_sf() +
+  map_theme() +
+  theme(panel.grid = element_blank(),
+        axis.ticks.x = element_line(linewidth = 0.1, color = "gray20"),
+        axis.text.y = element_blank())
+dh_map
+
+dist_map <- (dr_map + dh_map) + plot_layout(ncol = 2)
+
+ggsave("fire regime simulations/figures_defensa/map_distancias.png",
+       plot = dist_map, bg = "white",
+       width = 28, height = 15, units = "cm")
+
+preds <- 
+  (
+    arg_map + theme(axis.text = element_text(size = 7)) +
+      datamap + theme(axis.text = element_blank()) +
+      veg_burn + 
+      theme(axis.ticks.x = element_blank(),
+            axis.text.x = element_blank()) +
+      veg_unburn + 
+      theme(axis.ticks = element_blank(),
+            axis.text = element_blank()) +
+      ndvimap + 
+      elev +
+      theme(axis.ticks.y = element_blank(),
+            axis.text.y = element_blank())
+  ) +
+  plot_layout(nrow = 3, byrow = T,
+              heights = c(2, 2, 2),
+              widths = c(0.7, 0.7)) &
+  theme(legend.key.width = unit(2.5, "mm"),
+        legend.key.height = unit(2.5, "mm"),
+        legend.box.just = "left",
+        legend.box.margin = margin(0, 0, 0, -1, unit = "mm"),
+        legend.justification = "left",
+        
+        legend.margin = margin(0, 0, 0, 0, unit = "mm"), # Márgenes alrededor de la leyenda
+        legend.spacing = unit(1, "mm"), 
+        legend.spacing.y = unit(1.3, "mm"), # Espaciado entre filas de la leyenda
+        
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 7),
+        
+        panel.spacing.x = unit(0, "mm"),
+        plot.margin = margin(1, 1, 1, 1, unit = "mm"))
+
+
+ggsave("fire regime simulations/figures_defensa/pnnh_landscape.pdf",
+       plot = preds, 
+       width = fig_width_max * 0.8, height = 18, units = "cm")
+ggsave("fire regime simulations/figures_defensa/pnnh_landscape.png",
+       plot = preds, 
+       width = fig_width_max * 0.8, height = 18, units = "cm", bg = "white")
+
+
+
+# FWI maps ----------------------------------------------------------------
+
+fwi_modern <- rast(file.path("data", "fwi_daily_1998-2022", "24km",
+                             "fwi_fortnights_19970701_20230630_standardized_pnnh.tif"))
+# already in posgar 2007 and cropped to the park, to save memory.
+
+fwi_crop <- crop(fwi_modern, pnnh_buff, snap = "out")
+dates <- as.Date(c("2019-02-12", "2019-07-17", "2020-02-12", "2020-07-17"))
+lyrs <- which(time(fwi_modern) %in% dates)
+
+fwi_show <- fwi_crop[[lyrs]]
+names(fwi_show) <- dates
+
+fwi_img <-
+ggplot() +
+  geom_spatraster(data = fwi_show, aes(fill = after_stat(value))) +
+  geom_spatvector(data = pnnh, fill = NA, color = "black", linewidth = 0.3) +
+  scale_fill_viridis(option = "D", direction = 1, begin = 0.1, 
+                     name = "Anomalía de FWI") +
+  facet_wrap(~lyr, ncol = 4) +
+  coord_sf() +
+  scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  theme_minimal() + 
+  theme(legend.position = "bottom")
+fwi_img
+
+ggsave(
+  "fire regime simulations/figures_defensa/map_fwi.png", bg = "white",
+  plot = fwi_img, width = 24.5, height = 14, units = "cm"
+)
+
+
+
+# Fill unburnable layer ---------------------------------------------------
+
+## To do layer, with time
+
+# # Unburnable layer has gaps. Fill them
+# window <- matrix(1, nrow = 31, ncol = 31)
+# 
+# # Get mode in window
+# filled <- focal(
+#   veg_map_unburn,
+#   w = window,
+#   fun = function(x, ...) {
+#     x <- na.omit(x)
+#     if (length(x) == 0) return(NA)
+#     ux <- unique(x)
+#     ux[which.max(tabulate(match(x, ux)))]
+#   },
+#   na.policy = "only",    # solo procesa celdas NA
+#   filename = "veg_unburnable_filled.tif",         # sin guardar a disco
+#   datatype = "INT1U"     # formato entero
+# )
+# 
+# levels(filled) <- levels(veg_map)
+# 
+# # Replace NA in the original
+# veg_map_unburn_filled <- cover(veg_map_unburn, filled)
+# levels(veg_map_unburn_filled) <- levels(veg_map)
+
+# Burn probability: separate models and current climate -------------------
+
+# settings gráficos
+bp_vir <- "F"
+bp_begin <- 1
+bp_end <- 0.1
+bp_name <- "Probabilidad\nde quema (%)"
+maxcell <- 100000 * 2
+
+park_contour <- "black"
+park_lwd <- 0.2
+
+# Burn prob anual
+bp_modern <- ggplot() +
+  
+  # Unburnable cover map
+  geom_spatraster(data = veg_map_unburn, maxcell = maxcell, show.legend = F) +
+  scale_fill_manual(values = viridis(3, option = "E", begin = 0.15, end = 0.85)[c(3, 1, 2)],
+                    na.value = "transparent", na.translate = F,
+                    name = "Superficie\nno quemable") +
+  ggnewscale::new_scale_fill() +
+  
+  # Burn probability map
+  geom_spatraster(data = bmap3[[1]], maxcell = maxcell) +
+  scale_fill_viridis(option = bp_vir, na.value = "transparent",
+                     begin = bp_begin, end = bp_end,
+                     name = "%") +
+  
+  # National park
+  geom_spatvector(data = pnnh, fill = NA, color = park_contour, 
+                  linewidth = park_lwd * 2) + 
+  geom_spatvector(data = pnnh_buff, fill = NA, color = "gray20", 
+                  linewidth = park_lwd, alpha = 0.6) + 
+  
+  scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  # edit coordinates format
+  coord_sf() +
+  map_theme() +
+  theme(
+    panel.grid = element_blank(),
+    axis.ticks = element_line(linewidth = 0.1, color = "gray20"),
+    legend.key.width = unit(3, 'mm')
+  ) + 
+  labs(title = "Probabilidad de quema anual (1999-2022)") +
+  
+  ggspatial::annotation_scale(
+    location = "tr", height = unit(1.5, "mm"),
+    bar_cols = c("grey60", "white"),
+    text_col = "gray20",
+    text_cex = 1,
+    line_width = 0.4
+  ) +
+  annotation_north_arrow(
+    location = "tl", which_north = "true",  
+    style = north_arrow_orienteering(
+      line_width = 0.2,
+      line_col = "black",
+      fill = c("grey60", "white"),
+      text_col = "white",
+      text_family = "serif",
+      text_face = NULL,
+      text_size = 0,
+      text_angle = 0
+    ),
+    width = unit(6, "mm"),
+    height = unit(6, "mm")
+  )
+
+bp_modern
+ggsave(
+  "fire regime simulations/figures_defensa/burn_prob_modern.png",
+  plot = bp_modern, width = 14, height = 18, units = "cm", bg = "white"
+)
+
+
+# burn prob separate
+ll <- vector("list", 4)
+titles <- c(
+  "Probabilidad relativa de\nignición por humanos",
+  "Probabilidad relativa de\nignición por rayos",
+  "Probabilidad de escape",
+  "Probabilidad de\npropagación"
+)
+
+for(m in 1:4) {
+  # Burn prob anual
+  ll[[m]] <- 
+    
+    ggplot() +
+    
+    # Unburnable cover map
+    geom_spatraster(data = veg_map_unburn, maxcell = maxcell, show.legend = F) +
+    scale_fill_manual(values = viridis(3, option = "E", begin = 0.15, end = 0.85)[c(3, 1, 2)],
+                      na.value = "transparent", na.translate = F,
+                      name = "Superficie\nno quemable") +
+    ggnewscale::new_scale_fill() +
+    
+    # Burn probability map
+    geom_spatraster(data = burn_prob_models[[m]], maxcell = maxcell) +
+    scale_fill_viridis(option = bp_vir, na.value = "transparent",
+                       begin = bp_begin, end = bp_end,
+                       name = "%") +
+    
+    # National park
+    geom_spatvector(data = pnnh, fill = NA, color = park_contour, 
+                    linewidth = park_lwd * 2) + 
+    # geom_spatvector(data = pnnh_buff, fill = NA, color = park_contour, 
+    #                 linewidth = park_lwd) + 
+    
+    scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                       labels = function(x) sprintf("%.1f°", x)) +
+    scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                       labels = function(x) sprintf("%.1f°", x)) +
+    # edit coordinates format
+    coord_sf() +
+    map_theme() + 
+    theme(
+      panel.grid = element_blank(),
+      axis.ticks = element_line(linewidth = 0.1, color = "gray20"),
+      legend.position = "bottom",
+      legend.key.width = unit(7, 'mm'),
+      legend.key.height = unit(3, "mm"),
+      legend.title = element_text(margin = margin(r = unit(2, "mm")))
+    ) +  
+    labs(title = titles[m]) 
+}
+
+
+bp1 <- (
+  ll[[1]] + 
+  ll[[2]] + 
+  ll[[3]] + 
+  ll[[4]]
+) + plot_layout(nrow = 1, byrow = T)
+
+ggsave(
+  "fire regime simulations/figures_defensa/burn_prob_models.png",
+  plot = bp1, width = 30, height = 15, units = "cm", bg = "white"
+)
+
+
+# Burn prob 2040 ----------------------------------------------------------
+
+bp_2040 <- bmap3[[2:5]] 
+names(bp_2040) <- sc_names
+
+veg_map_unburn_mult <- c(
+  veg_map_unburn, veg_map_unburn, veg_map_unburn, veg_map_unburn
+)
+names(veg_map_unburn_mult) <- sc_names
+
+# df for north arrow and scalebar
+raster_df <- as.data.frame(bp_2040, xy = TRUE)
+raster_df$lyr <- "SSP1-2.6"
+
+bpmap40 <-
+  ggplot() +
+  
+  # Unburnable cover map
+  geom_spatraster(data = veg_map_unburn_mult, maxcell = maxcell, show.legend = F) +
+  scale_fill_manual(values = viridis(3, option = "E", begin = 0.15, end = 0.85)[c(3, 1, 2)],
+                    na.value = "transparent", na.translate = F,
+                    name = "Superficie\nno quemable") +
+  ggnewscale::new_scale_fill() +
+  
+  # Burn probability map
+  geom_spatraster(data = bp_2040, maxcell = maxcell) +
+  scale_fill_viridis(option = bp_vir, na.value = "transparent",
+                     begin = bp_begin, end = bp_end,
+                     name = bp_name) +
+  
+  facet_wrap(~ lyr, nrow = 1) +
+  
+  # National park
+  geom_spatvector(data = pnnh, fill = NA, color = park_contour, 
+                  linewidth = park_lwd * 2) + 
+  geom_spatvector(data = pnnh_buff, fill = NA, color = park_contour, 
+                  linewidth = park_lwd) + 
+  
+  scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  # edit coordinates format
+  coord_sf() +
+  map_theme() +
+  theme(
+    panel.grid = element_blank(),
+    panel.spacing.y = unit(4, "mm"),
+    legend.key.width = unit(10, "mm"),
+    legend.key.height = unit(3, "mm"),
+    legend.title = element_text(margin = margin(r = 7, unit = "mm")),
+    axis.ticks = element_line(linewidth = 0.1),
+    legend.position = "bottom",
+    strip.text = element_text(size = 14)
+  ) +
+  
+  # scale and north arrow
+  ggspatial::annotation_scale(
+    data = raster_df, 
+    location = "tr", height = unit(2, "mm"),
+    bar_cols = c("grey60", "white"),
+    text_col = "black",
+    text_cex = 1,
+    line_width = 0.2
+  ) +
+  annotation_north_arrow(
+    data = raster_df[1, ], 
+    location = "tl", which_north = "true",  
+    style = north_arrow_orienteering(
+      line_width = 0.2,
+      line_col = "black",
+      fill = c("grey60", "white"),
+      text_col = "transparent",
+      text_family = "arial",
+      text_face = NULL,
+      text_size = 0,
+      text_angle = 0
+    ),
+    width = unit(6, "mm"),
+    height = unit(6, "mm")) +
+  ggtitle("2040-2049")
+
+ggsave(
+  "fire regime simulations/figures_defensa/burn_prob_2040.png",
+  plot = bpmap40, width = 30, height = 17, units = "cm", bg = "white"
+)
+
+# Burn prob 2090 ----------------------------------------------------------
+
+bp_2090 <- bmap3[[6:9]] 
+names(bp_2090) <- sc_names
+
+# df for north arrow and scalebar
+raster_df <- as.data.frame(bp_2040, xy = TRUE)
+raster_df$lyr <- "SSP1-2.6"
+
+bpmap90 <- 
+  ggplot() +
+  
+  # Unburnable cover map
+  geom_spatraster(data = veg_map_unburn_mult, maxcell = maxcell, show.legend = F) +
+  scale_fill_manual(values = viridis(3, option = "E", begin = 0.15, end = 0.85)[c(3, 1, 2)],
+                    na.value = "transparent", na.translate = F,
+                    name = "Superficie\nno quemable") +
+  ggnewscale::new_scale_fill() +
+  
+  # Burn probability map
+  geom_spatraster(data = bp_2090, maxcell = maxcell) +
+  scale_fill_viridis(option = bp_vir, na.value = "transparent",
+                     begin = bp_begin, end = bp_end,
+                     name = bp_name) +
+  
+  facet_wrap(~ lyr, nrow = 1) +
+  
+  # National park
+  geom_spatvector(data = pnnh, fill = NA, color = park_contour, 
+                  linewidth = park_lwd * 2) + 
+  geom_spatvector(data = pnnh_buff, fill = NA, color = park_contour, 
+                  linewidth = park_lwd) + 
+  
+  scale_x_continuous(breaks = seq(-72, -71, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  scale_y_continuous(breaks = seq(-41.5, -40.5, by = 0.5), expand = c(0, 0),
+                     labels = function(x) sprintf("%.1f°", x)) +
+  # edit coordinates format
+  coord_sf() +
+  map_theme() +
+  theme(
+    panel.grid = element_blank(),
+    panel.spacing.y = unit(4, "mm"),
+    legend.key.width = unit(10, "mm"),
+    legend.key.height = unit(3, "mm"),
+    legend.title = element_text(margin = margin(r = 7, unit = "mm")),
+    axis.ticks = element_line(linewidth = 0.1),
+    legend.position = "bottom",
+    strip.text = element_text(size = 14)
+  ) +
+  
+  # scale and north arrow
+  ggspatial::annotation_scale(
+    data = raster_df, 
+    location = "tr", height = unit(2, "mm"),
+    bar_cols = c("grey60", "white"),
+    text_col = "black",
+    text_cex = 1,
+    line_width = 0.2
+  ) +
+  annotation_north_arrow(
+    data = raster_df[1, ], 
+    location = "tl", which_north = "true",  
+    style = north_arrow_orienteering(
+      line_width = 0.2,
+      line_col = "black",
+      fill = c("grey60", "white"),
+      text_col = "transparent",
+      text_family = "arial",
+      text_face = NULL,
+      text_size = 0,
+      text_angle = 0
+    ),
+    width = unit(6, "mm"),
+    height = unit(6, "mm")) +
+  
+  ggtitle("2090-2099")
+
+ggsave(
+  "fire regime simulations/figures_defensa/burn_prob_2090.png",
+  plot = bpmap90, width = 30, height = 17, units = "cm", bg = "white"
+)
+
+
+
+# Burned proportion in PNNH and lightning-burned proportion ---------------
+
+theme_set(theme_classic()) # for non maps
+
+exp_names <- c("1999-2022",
+               "2040-2049 SSP1 2.6", "2040-2049 SSP2 4.5",
+               "2040-2049 SSP3 7.0", "2040-2049 SSP5 8.5",
+               "2090-2099 SSP1 2.6", "2090-2099 SSP2 4.5",
+               "2090-2099 SSP3 7.0", "2090-2099 SSP5 8.5")
+
+exp_names2 <- c("2040-2049 SSP1 2.6", "2040-2049 SSP2 4.5",
+                "2040-2049 SSP3 7.0", "2040-2049 SSP5 8.5",
+                "2090-2099 SSP1 2.6", "2090-2099 SSP2 4.5",
+                "2090-2099 SSP3 7.0", "2090-2099 SSP5 8.5",
+                "1999-2022")
+
+sc_names <- c("SSP1-2.6", "SSP2-4.5",
+              "SSP3-7.0", "SSP5-8.5")
+
+tab <- readRDS(file.path("files", "fire_regime_simulation_FWIZ",
+                         "burn_prop_distribution_merged.rds"))
+
+ske <- aggregate(burned_count ~ experiment + scenario + decade, 
+                 tab, mean)[, 1:3]
+ske$land_size <- 100
+ske$burned_count <- 100
+
+ske <- ske[c(9, 1:8), ]
+
+ske$experiment2 <- factor(ske$experiment, levels = levels(tab$experiment),
+                          labels = exp_names)
+
+sss <- c("Moderno", rep(c("SSP1-2.6", "SSP2-4.5", "SSP3-7.0", "SSP5-8.5"), 2))
+ske$scenario <- factor(sss, levels = unique(sss))
+ppp <- c("1999-2022", rep("2040-2049", 4), rep("2090-2099", 4))
+ske$period <- factor(ppp, levels = unique(ppp))
+
+# ## Model for burned proportion
+# bprop_model <- brm(
+#   formula = bf(burned_count | trials(land_size) ~ experiment, 
+#                phi ~ experiment),  
+#   family = beta_binomial(), 
+#   data = tab,
+#   chains = 4, iter = 2000, warmup = 1000, refresh = 50, cores = 4
+# )
+# saveRDS(bprop_model, file.path("files", "fire_regime_simulation_FWIZ",
+#                                "burn_prop_model.rds"))
+
+
+# ## Model for lightning proportion
+# lprop_model <- brm(
+#   formula = bf(light_count | trials(burned_count) ~ experiment, 
+#                phi ~ experiment),  
+#   family = beta_binomial(), 
+#   data = tab[tab$burned_count > 0, ],
+#   chains = 4, iter = 2000, warmup = 1000, refresh = 50, cores = 4
+# )
+# saveRDS(lprop_model, file.path("files", "fire_regime_simulation_FWIZ",
+#                                "burn_prop_model_lightning.rds"))
+
+
+## Predicciones
+
+
+bprop_model <- readRDS(file.path("files", "fire_regime_simulation_FWIZ",
+                                 "burn_prop_model.rds"))
+lprop_model <- readRDS(file.path("files", "fire_regime_simulation_FWIZ",
+                                 "burn_prop_model_lightning.rds"))
+
+pfit_samples <- fitted(bprop_model, newdata = ske, summary = F) |> t()
+bprop <- cbind(
+  ske,
+  apply(pfit_samples, 1, hdmean, name = "p") |> t() |> as.data.frame()
+)
+
+ww <- 0.9
+p1 <- 
+  ggplot(bprop, aes(x = period, y = p_mean, ymin = p_lower, ymax = p_upper,
+                    color = scenario, fill = scenario)) +
+  geom_bar(stat = "identity", 
+           position = position_dodge2(width = ww, preserve = "single"),
+           linewidth = 0.3, alpha = 0.6, width = ww) +
+  geom_linerange(position = position_dodge2(width = ww, preserve = "single")) +
+  scale_color_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático") +
+  scale_fill_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático",
+                     alpha = 0.5) + 
+  xlab("Período") + 
+  ylab("Proporción quemada anual (%)") +
+  scale_y_continuous(expand = c(0, 0),
+                     breaks = seq(0, 3, 1)) +
+  nice_theme() +
+  theme(panel.grid.major.y = element_line(linewidth = 0.25, color = "gray80"),
+        plot.tag.position = c(0.14, 0.95)) +
+  labs(tag = "A")
+p1
+
+# ggsave("fire regime simulations/figures_defensa/burn_prob_mean_comparison.pdf",
+#        plot = last_plot(),
+#        width = 14, height = 8, units = "cm")
+# ggsave("fire regime simulations/figures_defensa/burn_prob_mean_comparison.png",
+#        plot = last_plot(),
+#        width = 14, height = 8, units = "cm", bg = "white")
+
+# write.csv(bprop, "fire regime simulations/figures_defensa/burn_prob_means.csv", 
+#           row.names = F)
+
+
+# Lightning
+lfit_samples <- fitted(lprop_model, ske, summary = F) |> t()
+lprop <- cbind(
+  ske,
+  apply(lfit_samples, 1, hdmean, name = "p") |> t() |> as.data.frame()
+)
+
+
+p2 <- 
+  ggplot(lprop, aes(x = period, y = p_mean, ymin = p_lower, ymax = p_upper,
+                    color = scenario, fill = scenario)) +
+  geom_bar(stat = "identity", 
+           position = position_dodge2(width = ww, preserve = "single"),
+           linewidth = 0.3, alpha = 0.6, width = ww) +
+  geom_linerange(position = position_dodge2(width = ww, preserve = "single")) +
+  scale_color_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático") +
+  scale_fill_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático",
+                     alpha = 0.5) + 
+  xlab("Período") + 
+  ylab("Proporción quemada por rayos (%)") +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 45),
+                     breaks = seq(0, 40, 10)) +
+  nice_theme() +
+  theme(panel.grid.major.y = element_line(linewidth = 0.25, color = "gray80"),
+        plot.tag.position = c(0.14, 0.95)) +
+  labs(tag = "B")
+p2
+
+# BOTH plots
+pboth <- (p1 + theme(axis.text.x = element_blank(),
+                     axis.title.x = element_blank()) +
+            p2) + plot_layout(nrow = 2, guides = "collect")
+pboth
+
+ggsave("fire regime simulations/figures_defensa/burn_prob_light_mean_comparison.pdf",
+       plot = last_plot(),
+       width = 14, height = 13, units = "cm")
+ggsave("fire regime simulations/figures_defensa/burn_prob_light_mean_comparison.png",
+       plot = last_plot(),
+       width = 14, height = 13, units = "cm", bg = "white")
+
+
+## Make the same in table format
+
+qb_samples <- t(t(pfit_samples) / pfit_samples[1, , drop = T])
+ql_samples <- t(t(lfit_samples) / lfit_samples[1, , drop = T])
+
+qb_summ <- apply(qb_samples, 1, hdmean, name = "qb") |> t()
+ql_summ <- apply(ql_samples, 1, hdmean, name = "ql") |> t()
+
+
+round_paste <- function(d, rr = 2) {
+  # d = qb_summ; rr = 2
+  dr <- round(d, rr)
+  
+  col_mean <- grep("mean", colnames(d))
+  col_lower <- grep("_lower", colnames(d))
+  col_upper <- grep("_upper", colnames(d))
+  
+  res <- paste(dr[, col_mean], 
+               " [", dr[, col_lower], "; ", 
+               dr[, col_upper], "]", 
+               sep = "")
+  
+  return(res)
+}
+
+
+table_out <- data.frame(
+  Periodo = ske$period,
+  Escenario = ske$scenario,
+  prop_quem = round_paste(apply(pfit_samples, 1, hdmean, name = "p") |> t()),
+  prop_quem_q = round_paste(qb_summ),
+  prop_rayos = round_paste(apply(lfit_samples, 1, hdmean, name = "p") |> t()),
+  prop_rayos_q = round_paste(ql_summ)
+)
+
+latex_table <- knitr::kable(table_out, format = "latex", booktabs = TRUE)
+
+
+
+# Assess burned proportion distribution (dharma) --------------------------
+
+bcount_sim <- predict(bprop_model, summary = F) |> t()
+lcount_sim <- predict(lprop_model, summary = F) |> t()
+
+bp_res <- createDHARMa(bcount_sim, tab$burned_count, integerResponse = T)
+lp_res <- createDHARMa(lcount_sim, tab$light_count[tab$burned_count > 0], 
+                       integerResponse = T)
+
+plotResiduals(bp_res, form = tab$experiment)
+plotResiduals(lp_res, form = tab$experiment[tab$burned_count > 0])
+# Subestima un poco las colas, mejor usar percentiles crudos.
+
+# edit tab for plotting
+
+tab2 <- tab
+tab2$experiment <- factor(tab$experiment, levels = levels(tab$experiment),
+                          labels = exp_names)
+tab2$scenario <- factor(tab$scenario, 
+                        levels = c("modern","ssp126","ssp245","ssp370","ssp585"),
+                        labels = c("Moderno", "SSP1-2.6", "SSP2-4.5",
+                                   "SSP3-7.0", "SSP5-8.5"))
+tab2$decade <- factor(tab$decade, levels = unique(tab$decade),
+                      labels =  c("1999-2022", "2040-2049", "2090-2099"))
+
+
+# Get burned proportion
+
+
+ggplot(tab2, aes(x = burned_prop, color = scenario, fill = scenario)) +
+  geom_density() +
+  scale_color_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático") +
+  scale_fill_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático",
+                     alpha = 0.5) + 
+  facet_wrap(vars(decade), nrow = 1) +
+  xlab("Proporción quemada (%)") + 
+  ylab("Proporción quemada por rayos (%)") +
+  nice_theme() +
+  theme(panel.grid.major.y = element_line(linewidth = 0.25, color = "gray80"))
+
+aggregate(burned_prop * 100 ~ decade + scenario, tab2, quantile, 
+          probs = seq(0.1, 0.9, by = 0.1), method = 8)
+
+
+plot(ecdf(tab2$burned_prop[tab2$experiment == "2090-2099 SSP5 8.5"]))
+lines(ecdf(tab2$burned_prop[tab2$experiment == "1999-2022"]), col = 2)
+
+
+ecdf_out <- function(x) {
+  ECDF <- ecdf(x)
+  return(data.frame(cdf = ECDF(x), x = x))
+}
+
+tab3 <- tab2
+tab3$burned_perc <- tab$burned_prop * 100
+tab3$cdf <- NA
+
+for(e in levels(tab3$experiment)) {
+  rows <- tab3$experiment == e  
+  ECDF <- ecdf(tab3$burned_perc[rows])
+  tab3$cdf[rows] <- ECDF(tab3$burned_perc[rows])
+}
+
+p3 <-
+  ggplot(tab3, aes(x = burned_perc, y = cdf, color = scenario, fill = scenario)) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", linewidth = 0.1) +
+  geom_line() +
+  scale_color_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático") +
+  scale_fill_viridis(option = "C", discrete = T, end = 0.8, name = "Escenario\nclimático",
+                     alpha = 0.5) + 
+  facet_wrap(vars(decade), nrow = 1, axes = "all",
+             axis.labels = "margins") +
+  #ylab("Probabilidad acumulada\n[Pr(X<=x)]") +
+  ylab(expression(atop("Probabilidad acumulada", "[Pr(X" <= "x)]"))) +
+  xlab("Proporción quemada anual (%)") +
+  scale_y_continuous(breaks = seq(0, 1, 0.2),
+                     limits = c(0, 1.02), expand = c(0.001, 0.001)) +
+  nice_theme() +
+  theme(panel.grid.major.y = element_line(linewidth = 0.25, color = "gray80"))
+p3
+
+ggsave("fire regime simulations/figures_defensa/burn_prob_cdf.pdf",
+       plot = last_plot(),
+       width = 14, height = 6, units = "cm")
+ggsave("fire regime simulations/figures_defensa/burn_prob_cdf.png",
+       plot = p3,
+       width = 14, height = 6, units = "cm", bg = "white")
+
+# table
+tab_perc <- aggregate(burned_perc ~ scenario + decade, tab3, quantile, 
+                      probs = seq(0, 1, by = 0.05), method = 8)
+write.csv(tab_perc,
+          "fire regime simulations/figures_defensa/burn_prob_quantiles.csv", 
+          row.names = F)

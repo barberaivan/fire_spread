@@ -21,8 +21,7 @@ nice_theme <- function() {
   )
 }
 
-# Temporal imputation of missing values across the cells of a raster matrix
-# (cells in rows, layers in columns).
+# Temporal imputation of missing values across the time-series of a variable
 impute_time <- function(x) {
   dseq <- 1:length(x)
   na_cols <- is.na(x)
@@ -76,7 +75,6 @@ sapply(mtable$model, function(x) {
 mtable$emember[mtable$model == "ACCESS-CM2"] <- "r2i1p1f1"
 mtable$emember[mtable$model == "MIROC-ES2L"] <- "r1i1p1f2"
 
-
 # Extract FWI values from one run by model --------------------------------
 
 # By model and scenario, get the FWI ts in the roi
@@ -119,6 +117,7 @@ saveRDS(tslist, file.path(target_dir0, "fwi_historical_proj_tslist.rds"))
 
 # Summarise by year -------------------------------------------------------
 
+tslist <- readRDS(file.path(target_dir0, "fwi_historical_proj_tslist.rds"))
 nm <- nrow(mtable)
 
 hbegin <- "1850-07-01"
@@ -228,11 +227,6 @@ ggsave(file.path(target_dir0, "FWI_projections_ts_gt38.png"), plot = b,
 ggsave(file.path(target_dir0, "FWI_projections_ts_p95.png"), plot = c,
        width = 11, height = 9, units = "cm", dpi = 900)
 
-
-
-
-
-
 # Average + realizations
 A <- 
 ggplot() + 
@@ -273,9 +267,119 @@ ggplot() +
 
 A+B+C
 
-
-
 # Export table ------------------------------------------------------------
 
 write.csv(summ_df_avg, file.path(target_dir0, "fwi_annual_summaries.csv"),
           row.names = F)
+
+
+
+# Perc95 in Spanish, for thesis defense -----------------------------------
+
+d2 <- summ_df_avg
+d2$scenario <- factor(
+  d2$scenario, 
+  levels = unique(d2$scenario),
+  labels = c("Histórico", "SSP1-2.6", "SSP2-4.5", "SSP3-7.0", "SSP5-8.5")
+)
+
+ggplot(d2, aes(season, fwi.p95, color = scenario)) + 
+  geom_line() + 
+  scale_color_viridis(discrete = T, end = 0.9, option = "A") +
+  xlab("Año") +
+  ylab("FWI (percentil 95 %)") +
+  theme(legend.title = element_blank()) +
+  nice_theme()
+
+
+# Get modern record -------------------------------------------------------
+
+# Import image
+rr <- rast("data/fwi_daily_1998-2022/24km/fwi_daily_19970701_20230630.tif")
+
+# Extract dates
+dates <- time(rr)
+
+# Extract values in roi
+fwi_raw <- terra::extract(rr, roi, method = "bilinear", raw = T)[, -1]
+
+# Impute missing values
+fwi_imputed <- impute_time(fwi_raw)
+
+# make df with all data.
+dmod <- data.frame(date = dates, fwi = fwi_imputed)
+
+# Get fire season
+dmod$season <- get_fseason(dmod$date)
+
+# Aggregate (perc95 by season)
+dmod <- aggregate(fwi ~ season, dmod, quantile, prob = 0.95, method = 8)
+
+# Merge with historical scale
+dhist <- d2[d2$scenario == "Histórico", ]
+dhist_comp <- dhist[dhist$season %in% out_agg$season, ]
+dmod_comp <- dmod[dmod$season %in% dhist$season, ]
+
+# scale to historical range
+dmod2 <- dmod
+fwiz <- (dmod$fwi - mean(dmod_comp$fwi)) / sd(dmod_comp$fwi)
+dmod2$fwi <- fwiz * sd(dhist_comp$fwi.p95) + mean(dhist_comp$fwi.p95)
+
+# Merge with d2
+names(d2)
+d3 <- d2[, c("season", "scenario", "fwi.p95")]
+names(d3) <- c("season", "scenario", "fwi")
+d3$scenario <- as.character(d3$scenario)
+
+dmod2$scenario <- "Moderno"
+dmod2 <- dmod2[, c("season", "scenario", "fwi")]
+
+d4 <- rbind(d3, dmod2)
+d4$scenario <- factor(
+  as.character(d4$scenario), 
+  levels = c("Histórico", "Moderno", "SSP1-2.6", "SSP2-4.5", "SSP3-7.0", "SSP5-8.5")
+)
+
+# Ribbons for periods
+ylow <- 25; yhigh <- 44
+ribs <- data.frame(
+  season = c(1999, 2022, 2040, 2049, 2090, 2099),
+  period = rep(c("modern", "40s", "90s"), each = 2),
+  ylow = rep(ylow, 6),
+  yhigh = rep(yhigh, 6)
+)
+
+
+filter <- 
+  d4$scenario != "Histórico" &
+  (d4$scenario != "Moderno" & d4$season >= 2023) |
+  (d4$scenario == "Moderno" & d4$season <= 2023) 
+
+ggplot(
+  data = d4[filter, ], 
+  mapping = aes(season, fwi, color = scenario)
+  ) + 
+  geom_ribbon(
+    data = ribs, mapping = aes(season, ymin = ylow, ymax = yhigh, group = period),
+    inherit.aes = F, alpha = 0.15, color = NA
+  ) +
+  geom_line(alpha = 0.8) + 
+  geom_smooth(se = F, method = "loess", span = 1) +
+  # scale_color_viridis(discrete = T, end = 0.9, option = "A") +
+  scale_color_viridis(option = "C", discrete = T, end = 0.8, 
+                      name = "Escenario\nclimático") +
+  xlab("Año") +
+  ylab("FWI (percentil 95 %)") +
+  theme(legend.title = element_blank()) +
+  nice_theme() + 
+  scale_y_continuous(limits = c(ylow, yhigh), expand = c(0, 0)) +
+  theme(
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+ggsave(
+  "fire regime simulations/figures_defensa/FWI_projections.png",
+  width = 14, height = 10, units = "cm", dpi = 600
+)

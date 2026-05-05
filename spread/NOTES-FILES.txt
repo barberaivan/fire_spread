@@ -1,0 +1,10 @@
+En la tesis, la estimación del modelo de propagación sucedió en 
+	sampling_fire_wise_posteriors_(stage1).R 
+	hierarchical model fitting_FWIZ2.R
+
+
+En el paper, usé
+	sampling_fire_wise_posteriors_(stage1)_SMC.R
+	hierarchical model fitting_FWIZ2_SMC.R
+
+el segundo código es muy muy similar al primero de hierarchical, cambia el archivo de muestras y se optimiza un pocoS
